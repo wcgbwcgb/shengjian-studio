@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>声间 推广片</title>
+<style>
+@font-face{font-family:NS;src:url('file:///C:/Windows/Fonts/NotoSansSC-VF.ttf');font-weight:100 900}
+@font-face{font-family:NSerif;src:url('file:///C:/Windows/Fonts/NotoSerifSC-VF.ttf');font-weight:200 900}
+:root{--bg:#f5f6f2;--paper:#fff;--ink:#202a25;--muted:#7d857e;--line:#e6e9e2;--green:#27785d;--deep:#2f5d48;--lime:#d7edb9;--side:#131e19;--soft:#edf2e8}
+*{box-sizing:border-box}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:var(--side);font-family:NS,"Microsoft YaHei",sans-serif;color:var(--ink)}
+.scene{position:absolute;inset:0;opacity:0;overflow:hidden;visibility:hidden}
+.dark{background:radial-gradient(ellipse at 50% 40%,#1d2d24 0%,#131e19 60%,#0d1511 100%);color:#e8efe6}
+.light{background:radial-gradient(ellipse at 20% 30%,#fbfcf8 0%,#f2f4ee 55%,#e9eee3 100%)}
+
+/* captions */
+.cap{position:absolute;left:120px;top:0;bottom:0;width:540px;display:flex;flex-direction:column;justify-content:center}
+.kicker{font-size:19px;letter-spacing:5px;color:var(--green);font-weight:650;margin-bottom:26px}
+.cap h2{font-family:NSerif;font-size:58px;line-height:1.28;font-weight:800;margin:0 0 30px;letter-spacing:-1px;white-space:pre-line}
+.cap p{font-size:22px;line-height:1.75;color:#6c766c;margin:0}
+.cap .bar{width:56px;height:4px;border-radius:2px;background:var(--green);margin-bottom:30px;transform-origin:left}
+
+/* app window */
+.win{position:absolute;left:690px;top:140px;width:1110px;height:800px;border-radius:22px;background:#f8f9f5;box-shadow:0 40px 120px #1f362733,0 4px 18px #1f36271a;overflow:hidden;display:flex;border:1px solid #e3e8dd}
+.wside{width:200px;background:var(--side);color:#a6b7aa;padding:26px 16px;flex-shrink:0;position:relative}
+.dots{display:flex;gap:7px;margin:0 6px 26px}.dots i{width:11px;height:11px;border-radius:50%;background:#2b3a31}
+.wbrand{display:flex;gap:10px;align-items:center;color:#fff;font-size:22px;font-weight:700;letter-spacing:3px;margin:0 6px 30px}
+.logo{display:grid;place-items:center;background:#2c3d2c;color:#d2e6ad;border-radius:11px;width:38px;height:38px}
+.logo svg{width:24px;height:24px}
+.wbrand small{display:block;font-size:7px;letter-spacing:1px;white-space:nowrap;color:#819685;margin-top:3px;font-weight:600}
+.nav{display:flex;gap:11px;align-items:center;padding:12px 12px;border-radius:9px;margin:3px 0;font-size:15px}
+.nav b{font-weight:400;width:18px;text-align:center;font-size:15px}
+.nav.on{color:var(--lime);background:#2c3d2c}
+.nlabel{font-size:10px;letter-spacing:1.5px;color:#66796c;padding:14px 12px 6px}
+.wmain{flex:1;position:relative;min-width:0}
+.wtop{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;font-size:13px;color:var(--muted);background:#fafbf8}
+.wtop .btns{display:flex;gap:10px}.wtop .btns span{border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:#fff;color:#4c574e}
+.wbody{padding:28px 34px;position:relative}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:10px 16px;font-size:15px;color:#33403a;white-space:nowrap}
+.btn.primary{background:var(--deep);border-color:var(--deep);color:#fff}
+.chip{display:inline-block;font-size:12px;border-radius:6px;background:#f1f3ee;color:#78816f;padding:4px 9px;margin-right:6px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px}
+.eyebrow{font-size:11px;letter-spacing:3px;color:#8a978a;font-weight:600}
+.caret{display:inline-block;width:2px;height:1.1em;background:var(--green);vertical-align:-3px;margin-left:2px}
+
+/* cursor */
+.cursor{position:absolute;left:0;top:0;width:30px;height:30px;z-index:50;pointer-events:none;filter:drop-shadow(0 3px 6px #0004)}
+.ripple{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;border:3px solid var(--green);z-index:49;opacity:0}
+
+/* scene 1 */
+#s1 .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.hook{font-family:NSerif;font-size:84px;font-weight:700;letter-spacing:2px;line-height:1.35}
+.hook em{font-style:normal;color:var(--lime)}
+.wave{display:flex;gap:9px;align-items:center;height:160px;margin-top:40px}
+.wave i{width:8px;border-radius:5px;background:#a9c98c;height:20px}
+.sub1{font-size:30px;color:#9fb3a3;margin-top:26px;letter-spacing:2px}
+
+/* scene 2 */
+#s2 .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.biglogo{width:170px;height:170px;border-radius:44px;background:#2c3d2c;display:grid;place-items:center;box-shadow:0 30px 90px #000a}
+.biglogo svg{width:110px;height:110px}
+.bname{font-size:150px;font-weight:800;letter-spacing:40px;margin:46px 0 0 40px;color:#fff;font-family:NSerif}
+.bsub{font-size:22px;letter-spacing:12px;color:#86a08b;font-weight:600;margin-top:6px}
+.btag{font-size:36px;color:#dfe9dc;margin-top:46px;letter-spacing:4px}
+
+/* scene 3 home */
+.home h1{font-family:NSerif;font-size:46px;text-align:center;margin:22px 0 10px;font-weight:800;color:#25392e}
+.home .lead{text-align:center;font-size:15px;color:#8a9389;margin-bottom:28px}
+.inputbox{border:1px solid #dfe5da;border-radius:18px;background:#fff;padding:24px 26px 18px;box-shadow:0 10px 30px #2a3f3010}
+.inputbox .txt{font-size:22px;line-height:1.7;min-height:118px;color:#253029}
+.inputbox .ph{color:#a6ada4}
+.inputfoot{display:flex;align-items:center;gap:14px;font-size:14px;color:#6f786f;margin-top:10px}
+.inputfoot .sp{flex:1}
+.check{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:4px;background:var(--green);color:#fff;font-size:12px;margin-right:6px;vertical-align:-3px}
+.modes{display:flex;gap:16px;justify-content:center;margin-top:24px}
+.mode{width:340px;border-radius:14px;padding:18px 20px;border:1px solid var(--line);background:#fff;font-size:14px;color:#768076;line-height:1.7}
+.mode b{display:block;font-size:17px;color:#26352c;margin-bottom:4px}
+
+/* scene 4 inspiration */
+.insp-head{display:flex;gap:10px;align-items:center;margin:14px 0 18px}
+.insp-head .field{flex:1;border:1px solid #dfe5da;border-radius:10px;background:#fff;padding:11px 14px;font-size:15px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.icard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 16px 14px;height:222px;display:flex;flex-direction:column;position:relative}
+.icard .k{font-size:11px;color:#97a194}
+.icard h4{font-size:18px;line-height:1.45;margin:8px 0 6px;color:#24322a}
+.icard p{font-size:13px;color:#899188;line-height:1.6;margin:0}
+.icard .acts{margin-top:auto;display:flex;gap:6px;white-space:nowrap;align-items:center;font-size:12px}
+.icard .acts span{border:1px solid var(--line);border-radius:7px;padding:5px 9px;color:#5f6b61}
+.icard .acts .go{background:var(--deep);color:#fff;border-color:var(--deep);margin-left:auto}
+.icard.fav{border-color:#b8d39c;box-shadow:0 0 0 3px #d7edb966}
+.icard .src{position:absolute;right:14px;top:14px;font-size:10px;color:#6e8f63;background:#eef5e6;border-radius:5px;padding:3px 7px}
+
+/* scene 5 clarify */
+.clar{display:grid;grid-template-columns:1fr 300px;gap:18px;margin-top:6px}
+.chat{height:600px;display:flex;flex-direction:column;gap:14px;padding:18px}
+.bub{max-width:82%;padding:13px 16px;border-radius:14px;font-size:16px;line-height:1.6}
+.bub.u{align-self:flex-end;background:var(--deep);color:#fff;border-bottom-right-radius:4px}
+.bub.c{align-self:flex-start;background:#f2f5ee;border-bottom-left-radius:4px;color:#2a362e}
+.bub.c .q{font-weight:700;margin-top:4px}
+.opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.opts span{border:1px solid #d6dfd0;border-radius:20px;padding:6px 13px;background:#fff;font-size:14px;color:#3c4a40}
+.opts span.sel{background:var(--deep);color:#fff;border-color:var(--deep)}
+.req{padding:16px}
+.req h5{margin:0 0 2px;font-size:15px}
+.req .hint{font-size:11px;color:#9aa298;margin-bottom:10px}
+.rf{margin-top:10px}
+.rf label{font-size:12px;color:#6c766c;display:block;margin-bottom:5px}
+.rf div{border:1px solid #e1e6dc;border-radius:8px;padding:8px 10px;font-size:14px;min-height:38px;color:#b0b6ad;background:#fff}
+.rf div.filled{color:#24322a;border-color:#b8d39c;background:#f6faf0}
+.gobtn{position:absolute;right:34px;bottom:26px}
+
+/* scene 6 directions/script */
+.dirs{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}
+.dcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;height:250px;display:flex;flex-direction:column}
+.dcard .n{font-size:12px;color:#97a194;letter-spacing:2px}
+.dcard h4{font-size:20px;margin:8px 0;line-height:1.45;color:#22302a}
+.dcard p{font-size:13px;color:#848d83;line-height:1.7;margin:0}
+.dcard .pick{margin-top:auto;align-self:flex-start}
+.dcard.sel{border-color:var(--green);box-shadow:0 0 0 3px #27785d22}
+.morebar{display:flex;gap:10px;margin-top:16px}
+.para{border:1px solid var(--line);border-radius:12px;background:#fcfdf9;padding:14px 16px;margin-bottom:12px}
+.para .top{display:flex;align-items:center;gap:10px;font-size:12px;color:#8b9489;margin-bottom:8px}
+.para .role{background:#e8f2e8;color:#367658;border-radius:6px;padding:3px 9px;font-size:12px}
+.para .txt{font-size:17px;line-height:1.75;color:#28352d}
+.para .lock{margin-left:auto}
+.tabs{display:flex;gap:30px;border-bottom:1px solid var(--line);font-size:14px;color:#9aa298;margin-bottom:16px}
+.tabs span{padding:10px 0}.tabs span.on{color:var(--deep);border-bottom:2px solid var(--deep);font-weight:600}
+
+/* scene 7 materials */
+.brief{font-size:17px;line-height:1.75;border:1px solid #dfe5da;border-radius:12px;background:#fff;padding:14px 16px;min-height:96px}
+.quick{display:flex;gap:8px;margin:12px 0 14px}.quick span{font-size:12px;background:#f1f4ec;border:1px solid #e3e9dc;border-radius:7px;padding:5px 10px;color:#5d6c5d}
+.arow{display:flex;align-items:center;gap:14px;border-top:1px solid var(--line);padding:12px 2px}
+.thumb{width:76px;height:46px;border-radius:7px;flex-shrink:0;display:grid;place-items:center;color:#fff;font-size:18px}
+.ainfo{flex:1;min-width:0}
+.ainfo b{font-size:15px;font-weight:600;color:#26332b}
+.ainfo small{display:block;font-size:12px;color:#97a093;margin-top:3px}
+.note:empty{display:none}.note{font-size:13px;color:#4e6a52;background:#f1f6eb;border-radius:6px;padding:3px 8px;margin-left:8px;font-weight:400}
+.role{font-size:13px;border-radius:8px;padding:7px 12px;font-weight:600;min-width:92px;text-align:center}
+.r-must{background:#27785d;color:#fff}.r-opt{background:#eef1ea;color:#5e6a60}.r-ref{background:#e7eefb;color:#3d5f9a}.r-keep{background:#f6ead0;color:#94702e}.r-no{background:#f4e7e3;color:#9b5a48}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px}.legend .role{display:inline-block;font-size:18px;padding:9px 16px}
+
+/* scene 8 agent */
+#s8 .title{position:absolute;left:120px;top:90px}
+#s8 .title .kicker{color:#a9c98c}
+#s8 .title h2{font-family:NSerif;font-size:58px;margin:0;font-weight:800;color:#fff}
+.term{position:absolute;left:120px;top:290px;width:980px;height:600px;border-radius:18px;background:#0b120e;border:1px solid #26362c;box-shadow:0 30px 90px #0008;overflow:hidden;font-family:Consolas,NS,monospace}
+.term .bar{height:46px;display:flex;align-items:center;gap:8px;padding:0 18px;border-bottom:1px solid #1f2c24;color:#7f9a86;font-size:15px}
+.term .bar i{width:11px;height:11px;border-radius:50%;background:#2b3a31}
+.term .bar span{margin-left:14px}
+.term .bar em{margin-left:auto;font-style:normal;color:#a9c98c;border:1px solid #2f4535;border-radius:6px;padding:3px 9px;font-size:13px}
+.lines{padding:26px 30px;font-size:21px;line-height:2.2}
+.ln{white-space:nowrap;color:#c6d6c9;opacity:0}
+.ln .ok{color:#8fd18b}.ln .ar{color:#d9c27a}.ln .dim{color:#6f8a76}
+.prog{position:absolute;left:26px;right:26px;bottom:24px;height:8px;border-radius:4px;background:#1c2a21;overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:linear-gradient(90deg,#5f9d6e,#b5d98e);border-radius:4px}
+.phone{position:absolute;left:1220px;top:150px;width:440px;height:782px;border-radius:44px;background:#0a0f0c;border:10px solid #26332b;box-shadow:0 40px 100px #000b;overflow:hidden}
+.screen{position:absolute;inset:0;background:linear-gradient(170deg,#203a2d,#0f1c15 70%);overflow:hidden}
+.screen .stitle{position:absolute;left:34px;right:34px;top:120px;font-family:NSerif;color:#fff;font-size:38px;line-height:1.45;font-weight:800}
+.screen .sbars{position:absolute;left:34px;right:34px;bottom:220px;height:180px;display:flex;align-items:center;gap:7px}
+.screen .sbars i{flex:1;border-radius:4px;background:#b7dd94}
+.screen .scap{position:absolute;left:34px;right:34px;bottom:130px;font-size:19px;color:#cfe0cf;line-height:1.6}
+.screen .bpm{position:absolute;left:34px;top:70px;font-size:14px;letter-spacing:4px;color:#a9c98c}
+.vers{position:absolute;left:1220px;top:952px;display:flex;gap:12px;width:620px}
+.ver{font-size:16px;border-radius:9px;padding:8px 14px;border:1px solid #2f4535;color:#9fb6a3;background:#16231b}
+.ver.on{background:#2c3d2c;color:var(--lime);border-color:#4b6a4f}
+.check-badge{position:absolute;left:1240px;top:80px;font-size:17px;color:#0f1a14;background:var(--lime);border-radius:30px;padding:9px 18px;font-weight:700;opacity:0}
+
+/* scene 9 values */
+#s9 .head{position:absolute;left:0;right:0;top:170px;text-align:center}
+#s9 .head h2{font-family:NSerif;font-size:64px;margin:16px 0 0;font-weight:800}
+.vals{position:absolute;left:150px;right:150px;top:400px;display:grid;grid-template-columns:repeat(4,1fr);gap:28px}
+.val{background:#fff;border:1px solid var(--line);border-radius:20px;padding:34px 30px;height:360px;box-shadow:0 20px 60px #1f36270f}
+.val .ic{width:62px;height:62px;border-radius:16px;background:var(--soft);display:grid;place-items:center;font-size:30px;color:var(--green);margin-bottom:28px}
+.val h3{font-size:30px;margin:0 0 16px;font-weight:800;color:#22302a}
+.val p{font-size:19px;line-height:1.75;color:#6f786f;margin:0}
+
+.stack{position:absolute;left:0;right:0;top:880px;text-align:center;font-size:20px;letter-spacing:3px;color:#8a978a}
+/* scene 10 outro */
+#s10 .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+#s10 .line1{font-family:NSerif;font-size:76px;font-weight:800;color:#fff;margin-top:50px}
+#s10 .line1 em{font-style:normal;color:var(--lime)}
+#s10 .line2{font-size:26px;color:#93ab98;margin-top:34px;letter-spacing:2px}
+#s10 .kbd{display:inline-block;border:1px solid #3b5141;background:#1a2a20;border-radius:10px;padding:6px 16px;color:#dfeadb;margin:0 6px}
+#s10 .mini{display:flex;gap:16px;align-items:center}
+#s10 .mini .logo{width:84px;height:84px;border-radius:22px}
+#s10 .mini .logo svg{width:52px;height:52px}
+#s10 .mini b{font-size:64px;color:#fff;letter-spacing:14px;font-family:NSerif}
+</style>
+</head>
+<body>
+
+<!-- 1 · hook -->
+<section class="scene dark" id="s1"><div class="center">
+  <div class="hook"><span id="h1a"></span></div>
+  <div class="hook" style="margin-top:6px"><em id="h1b"></em></div>
+  <div class="wave" id="wave1"></div>
+  <div class="sub1" id="h1c">中间那些事，交给声间。</div>
+</div></section>
+
+<!-- 2 · brand -->
+<section class="scene dark" id="s2"><div class="center">
+  <div class="biglogo" id="blogo"><svg viewBox="0 0 24 24" fill="none"><path id="lpath" d="M3 13c2.2-6 4.8-6 6.5-1.6S13.6 19 16 13s4-6.4 5-3.2" stroke="#d2e6ad" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+  <div class="bname" id="bname">声间</div>
+  <div class="bsub" id="bsub">CREATIVE COMPANION</div>
+  <div class="btag" id="btag">AI 视频创作空间 · 从一个想法，到一条完整视频</div>
+</div></section>
+
+<!-- 3 · home -->
+<section class="scene light" id="s3">
+  <div class="cap"><div class="kicker">01 · 开始</div><div class="bar"></div><h2>一句话，
+开始一条视频</h2><p>直接制作视频；或者先研究、先写稿，<br>想清楚了再做。</p></div>
+  <div class="win" data-nav="0" data-crumb="开始创作"><div class="wbody home">
+    <div class="eyebrow" style="text-align:center;margin-top:18px">YOUR NEXT STORY STARTS HERE</div>
+    <h1>今天想做什么视频？</h1>
+    <div class="lead">用一句话描述你想做的视频，比如主题、给谁看、想要的感觉。</div>
+    <div class="inputbox"><div class="txt" id="s3txt"></div>
+      <div class="inputfoot"><span>约 60 秒 ⌄</span><span>9:16 ⌄</span><span class="sp"></span><span><i class="check">✓</i>先帮我理清需求</span>
+      <span class="btn" id="s3research">先研究与写稿</span><span class="btn primary" id="s3direct">直接制作视频 ↗</span></div></div>
+    <div class="modes"><div class="mode"><b>先研究与写稿</b>先聊清楚需求，再查资料、给出方向和完整脚本</div><div class="mode"><b>直接制作视频</b>已经想清楚了，按描述直接出片</div></div>
+  </div></div>
+</section>
+
+<!-- 4 · inspiration -->
+<section class="scene light" id="s4">
+  <div class="cap"><div class="kicker">02 · 灵感</div><div class="bar"></div><h2>没想法？
+换一批</h2><p>几秒内离线发散，或联网找近期热点。<br>不喜欢就说哪里不喜欢，收藏的一直留着。</p></div>
+  <div class="win" data-nav="1" data-crumb="灵感发现"><div class="wbody">
+    <div class="eyebrow">IDEAS ON DEMAND</div>
+    <div style="font-family:NSerif;font-size:32px;font-weight:800;margin-top:6px">灵感发现</div>
+    <div class="insp-head"><div class="field">音乐 · 给普通听众</div><span class="btn primary" id="s4swap">↻ 换一批</span><span class="btn" id="s4web">⌕ 联网找近期热点</span></div>
+    <div class="grid3" id="s4grid"></div>
+  </div></div>
+</section>
+
+<!-- 5 · clarify -->
+<section class="scene light" id="s5">
+  <div class="cap"><div class="kicker">03 · 聊清楚</div><div class="bar"></div><h2>一次问一个问题，
+把需求聊清楚</h2><p>点选回答或直接打字。<br>确认的内容自动写进需求卡，随时可改。</p></div>
+  <div class="win" data-nav="2" data-crumb="创作工作室"><div class="wbody" style="padding-top:20px">
+    <div class="tabs"><span class="on">01 研究与角度</span><span>02 脚本</span><span>03 视频</span></div>
+    <div class="clar">
+      <div class="card chat" id="s5chat">
+        <div class="bub u" id="b0">为什么有些歌，一听就让人松弛？</div>
+        <div class="bub c" id="b1">好的，先确认一件事。<div class="q">这条视频主要给谁看？</div><div class="opts"><span id="o1a">不懂乐理的普通听众</span><span>正在学音乐的学生</span></div></div>
+        <div class="bub u" id="b2">不懂乐理的普通听众</div>
+        <div class="bub c" id="b3"><div class="q">看完以后，你想让观众得到什么？</div><div class="opts"><span id="o3a">听出松弛感从哪来</span><span>记住几个乐理名词</span><span>想去听这几首歌</span></div></div>
+        <div class="bub u" id="b4">听出松弛感从哪来</div>
+      </div>
+      <div class="card req"><h5>需求卡</h5><div class="hint">对话中确认的内容会自动填入</div>
+        <div class="rf"><label>给谁看</label><div id="f1">还没确定</div></div>
+        <div class="rf"><label>想让观众得到什么</label><div id="f2">还没确定</div></div>
+        <div class="rf"><label>核心观点</label><div id="f3">还没确定</div></div>
+        <div class="rf"><label>语气风格</label><div id="f4">还没确定</div></div>
+        <div class="rf"><label>必须包含</label><div id="f5">还没确定</div></div>
+      </div>
+    </div>
+    <span class="btn primary gobtn" id="s5go">够了，开始研究 →</span>
+  </div></div>
+</section>
+
+<!-- 6 · directions + script -->
+<section class="scene light" id="s6">
+  <div class="cap"><div class="kicker">04 · 研究与写稿</div><div class="bar"></div><h2>查资料、挑方向，
+写成你的脚本</h2><p>方向不止三个：再要几个、自己写、调整后再用。<br>脚本支持锁定、局部重写和历史恢复。</p></div>
+  <div class="win" data-nav="2" data-crumb="创作工作室"><div class="wbody" style="padding-top:20px">
+    <div class="tabs"><span class="on" id="s6t1">01 研究与角度</span><span id="s6t2">02 脚本</span><span>03 视频</span></div>
+    <div id="s6a">
+      <div style="font-size:14px;color:#7d867c">基于 12 个来源 · 选一个最想讲的角度</div>
+      <div class="dirs">
+        <div class="dcard" id="d1"><div class="n">方向 A</div><h4>先别讲道理，听听差别</h4><p>同一段旋律，换速度、换音色、换和弦，让观众自己听出“松”。</p><span class="btn pick primary" id="d1b">用这个写脚本 →</span></div>
+        <div class="dcard" id="d2"><div class="n">方向 B</div><h4>从心跳讲起</h4><p>60–80 BPM 接近静息心率，用节拍器和心跳做对照。</p><span class="btn pick">用这个写脚本 →</span></div>
+        <div class="dcard" id="d3"><div class="n">方向 C</div><h4>一首歌的慢镜头</h4><p>拆开一首放松歌曲，逐层听：鼓、低音、和声、人声。</p><span class="btn pick">用这个写脚本 →</span></div>
+      </div>
+      <div class="morebar"><span class="btn">＋ 再给几个方向</span><span class="btn">✎ 自己写一个方向</span><span class="btn">⇄ 调整后再用</span><span class="btn">💬 和 Claude 聊聊</span></div>
+    </div>
+    <div id="s6b" style="position:absolute;left:34px;right:34px;top:84px">
+      <div class="para" id="p1"><div class="top"><span class="role">旁白</span>开场 · 0–8 秒<span class="lock">🔒 已锁定</span></div><div class="txt" id="p1t"></div></div>
+      <div class="para" id="p2"><div class="top"><span class="role">画面</span>对比 · 8–30 秒</div><div class="txt" id="p2t"></div></div>
+      <div class="para" id="p3"><div class="top"><span class="role">旁白</span>收束 · 30–60 秒<span class="lock" style="color:#27785d">↻ 局部重写</span></div><div class="txt" id="p3t"></div></div>
+    </div>
+  </div></div>
+</section>
+
+<!-- 7 · materials -->
+<section class="scene light" id="s7">
+  <div class="cap"><div class="kicker">05 · 制作要求</div><div class="bar"></div><h2>写下要求，
+给每个素材一个用途</h2><div class="legend" id="s7legend">
+    <span class="role r-must">必须使用</span>
+    <span class="role r-opt">可选</span>
+    <span class="role r-ref">仅参考</span>
+    <span class="role r-keep">完整保留</span>
+    <span class="role r-no">不使用</span>
+  </div></div>
+  <div class="win" data-nav="2" data-crumb="创作工作室"><div class="wbody" style="padding-top:20px">
+    <div class="tabs"><span>✓ 研究与角度</span><span>✓ 脚本</span><span class="on">03 视频</span></div>
+    <div style="font-size:20px;font-weight:700;margin-bottom:4px">这条视频，你想要什么样？ <span class="chip" style="float:right">Claude · opus</span></div>
+    <div class="quick"><span>剪辑我的素材</span><span>参考一个视频</span><span>从零生成</span></div>
+    <div class="brief" id="s7brief"></div>
+    <div style="font-size:13px;color:#6f786f;margin:12px 0 6px"><i class="check">✓</i>附带当前脚本作为参考（3 段）</div>
+    <div id="s7rows"></div>
+    <div style="position:absolute;right:34px;top:690px"><span class="btn primary" id="s7go">让 Claude 制作完整视频 →</span></div>
+  </div></div>
+</section>
+
+<!-- 8 · agent -->
+<section class="scene dark" id="s8">
+  <div class="title"><div class="kicker">06 · 制作</div><h2>本机 Claude Code，一次做出完整视频</h2></div>
+  <div class="term"><div class="bar"><i></i><i></i><i></i><span>制作记录 · 为什么有些歌，一听就让人松弛？</span><em>Claude Code · opus</em></div>
+    <div class="lines" id="s8lines"></div><div class="prog"><i id="s8prog"></i></div></div>
+  <div class="phone"><div class="screen">
+    <div class="bpm" id="s8bpm">♩ = 72 BPM</div>
+    <div class="stitle" id="s8title">为什么有些歌，<br>一听就让人松弛？</div>
+    <div class="sbars" id="s8bars"></div>
+    <div class="scap" id="s8cap">慢一点、稳一点、能猜到下一拍——<br>耳朵就放松了。</div>
+  </div></div>
+  <div class="check-badge" id="s8badge">✓ 交付校验通过</div>
+  <div class="vers" id="s8vers"><span class="ver" id="v1">v1 · 初版</span><span class="ver" id="v2">v2 · 开头再短一点</span><span class="ver" id="v3">＋ 继续提修改</span></div>
+</section>
+
+<!-- 9 · values -->
+<section class="scene light" id="s9">
+  <div class="head"><div class="kicker" style="margin:0">WHY 声间</div><h2>你的创作，留在你手里</h2></div>
+  <div class="vals">
+    <div class="val"><div class="ic">⌂</div><h3>本机运行</h3><p>默认只监听本机。项目、素材和成片都在你的 data 目录里，备份它就够了。</p></div>
+    <div class="val"><div class="ic">⟲</div><h3>每次修改都是新版本</h3><p>原文件和历史版本不覆盖，随时比较、随时回到上一版。</p></div>
+    <div class="val"><div class="ic">✦</div><h3>订阅即可开始</h3><p>研究与写稿可直接用 Claude 订阅登录，无需 API Key；也能切换回 API。</p></div>
+    <div class="val"><div class="ic">⛨</div><h3>放手，但有边界</h3><p>制作时开放全部工具；越界删除、读取凭据、对外发布会被拦下。</p></div>
+  </div>
+  <div class="stack" id="s9stack">原生 HTML / JS &nbsp;·&nbsp; Python / FastAPI &nbsp;·&nbsp; SQLite &nbsp;·&nbsp; FFmpeg &nbsp;·&nbsp; Claude Code</div>
+</section>
+
+<!-- 10 · outro -->
+<section class="scene dark" id="s10"><div class="center">
+  <div class="mini" id="o1"><div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M3 13c2.2-6 4.8-6 6.5-1.6S13.6 19 16 13s4-6.4 5-3.2" stroke="#d2e6ad" stroke-width="2.4" stroke-linecap="round"/></svg></div><b>声间</b></div>
+  <div class="line1" id="o2">从一个想法，到<em>一条完整视频</em>。</div>
+  <div class="line2" id="o3">双击<span class="kbd">启动工作台.cmd</span>打开<span class="kbd">127.0.0.1:8765</span>开始创作</div>
+</div></section>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="arrow" viewBox="0 0 24 24"><path d="M4 2l15 11-6.5 1.2L16 21l-3 1.4-3.6-6.9L4 20z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+</defs></svg>
+
+<script>
+const LOGO='<svg viewBox="0 0 24 24" fill="none"><path d="M3 13c2.2-6 4.8-6 6.5-1.6S13.6 19 16 13s4-6.4 5-3.2" stroke="#d2e6ad" stroke-width="2.4" stroke-linecap="round"/></svg>';
+const NAV=[['✳','开始创作'],['⌕','灵感发现'],['▦','我的作品'],['▧','素材库'],['▷','成片'],['↗','发布记录']];
+const $=s=>document.querySelector(s);
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const outC=x=>1-Math.pow(1-x,3), inOut=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2, outBack=x=>{const c=1.6;return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2)};
+const P=(t,a,b,e=outC)=>e(clamp((t-a)/(b-a)));
+function show(el,t,at,dur=.6,dy=28,dx=0){if(typeof el==='string')el=$(el);const k=P(t,at,at+dur);el.style.opacity=k;el.style.transform=`translate(${(1-k)*dx}px,${(1-k)*dy}px)`;return k;}
+function type(el,text,t,a,b){if(typeof el==='string')el=$(el);const n=Math.round(text.length*clamp((t-a)/(b-a)));const caret=t>=a-.3&&(t<b+.6)&&(Math.floor(t*2.4)%2===0||t<b);el.innerHTML=text.slice(0,n).replace(/\n/g,'<br>')+(caret?'<span class="caret"></span>':'');}
+
+// build app-window chrome around each .win body
+document.querySelectorAll('.win').forEach(w=>{
+  const body=w.innerHTML,nav=+w.dataset.nav;
+  w.innerHTML=`<div class="wside"><div class="dots"><i></i><i></i><i></i></div><div class="wbrand"><div class="logo">${LOGO}</div><div>声间<small>CREATIVE COMPANION</small></div></div>
+  <div class="nlabel">创作</div>${NAV.slice(0,3).map((n,i)=>`<div class="nav${i===nav?' on':''}"><b>${n[0]}</b>${n[1]}</div>`).join('')}
+  <div class="nlabel">资源</div>${NAV.slice(3).map((n,i)=>`<div class="nav${i+3===nav?' on':''}"><b>${n[0]}</b>${n[1]}</div>`).join('')}</div>
+  <div class="wmain"><div class="wtop"><span>创作空间 &nbsp;/&nbsp; <b style="color:#465246;font-weight:500">${w.dataset.crumb}</b></span><span class="btns"><span>＋ 新建视频</span><span>⚙ 设置</span></span></div>${body}</div>
+  <svg class="cursor"><use href="#arrow"/></svg><div class="ripple"></div>`;
+});
+
+// static content builders
+$('#wave1').innerHTML=Array.from({length:44},()=>'<i></i>').join('');
+$('#s8bars').innerHTML=Array.from({length:22},()=>'<i></i>').join('');
+const B1=[['对比实验','同一段旋律，换个和弦就变悲伤','只改一个音，情绪整个翻过来。',['和声','对比']],['生活观察','副歌为什么总在第 45 秒出现','流行歌的结构，比你想的更像公式。',['结构','流行']],['城市','城市白噪音能不能算音乐','把通勤路上的声音剪成一段节奏。',['街头','采样']],['冷知识','为什么老歌越听越好听','熟悉感本身就是一种奖励。',['心理','怀旧']],['节奏','走路的速度，刚好是一首歌的 BPM','用步频给歌曲排个序。',['节拍','实验']],['开头','一首歌的前 5 秒决定了什么','流媒体时代的“开头焦虑”。',['数据','流行']]];
+const B2=[['歌单','“松弛感”歌单为什么突然流行','从最近的讨论看大家在逃离什么。',['热点','歌单']],null,['对比实验','用 AI 把一首歌改成 5 种速度','速度一变，画面感也变。',['速度','对比']],['乐器','为什么钢琴声总让人安静','泛音、衰减和房间的声音。',['音色','钢琴']],['街头','地铁站里的即兴演奏','路人停下脚步的那 8 小节。',['现场','街头']],['短视频','短视频 BGM 越来越短了吗','15 秒以内能放下什么。',['热点','短视频']]];
+const card=(c,i,web)=>`<div class="icard" id="ic${i}"><div class="k">灵感 · ${c[0]}</div>${web?'<span class="src">附来源</span>':''}<h4>${c[1]}</h4><p>${c[2]}</p><div style="margin-top:10px">${c[3].map(x=>`<span class="chip">${x}</span>`).join('')}</div><div class="acts"><span class="fv">☆ 收藏</span><span style="border:0;color:#9aa298">不感兴趣</span><span class="go">用这个开始 →</span></div></div>`;
+const ROWS=[['#c78a3a','♫','雨夜钢琴.mp3','Music · 2:41','r-keep','完整保留',''],['#3d6b55','▶','街头采访.mp4','Video · 0:48','r-must','必须使用','放在开头'],['#5b7d8f','▶','城市空镜.mp4','Video · 1:12','r-opt','可选',''],['#6a6aa0','▶','喜欢的一条剪辑.mp4','Video · 0:35','r-ref','仅参考','学它的转场'],['#8f6a5b','▶','旧版口播.mp4','Video · 0:52','r-no','不使用','']];
+$('#s7rows').innerHTML=ROWS.map((r,i)=>`<div class="arow" id="ar${i}"><div class="thumb" style="background:${r[0]}">${r[1]}</div><div class="ainfo"><b>${r[2]}</b><span class="note" id="an${i}"></span><small>${r[3]}</small></div><span class="role ${r[4]}" id="rr${i}">${r[5]}</span></div>`).join('');
+const LOG=[['ok','✓','读取制作要求、素材用途与参考脚本'],['ok','✓','预分析素材：镜头切换点 · 静音段 · 平均响度'],['ar','▸','剪辑 街头采访.mp4 → 开场 00:00–00:07'],['ar','▸','生成动态图形：节拍与心跳对照'],['ar','▸','配乐：雨夜钢琴.mp3 完整保留，原始增益'],['ar','▸','学习参考剪辑的转场节奏（不进入成片）'],['ar','▸','渲染 1080×1920 · 60 秒'],['ok','✓','交付校验：必须使用 已出现 · 仅参考 未入片']];
+$('#s8lines').innerHTML=LOG.map((l,i)=>`<div class="ln" id="lg${i}"><span class="${l[0]}">${l[1]}</span> ${l[2]} <span class="dim" id="lgd${i}"></span></div>`).join('');
+
+// cursor helpers: coordinates relative to the .win element
+function rel(el,root){let x=0,y=0;while(el&&el!==root){x+=el.offsetLeft;y+=el.offsetTop;el=el.offsetParent;}return [x,y];}
+function target(win,sel){const el=win.querySelector(sel);const [x,y]=rel(el,win);return [x+el.offsetWidth*.55,y+el.offsetHeight*.6];}
+function cursor(win,t,keys,clicks=[],hideAt=1e9){
+  const cur=win.querySelector('.cursor'),rip=win.querySelector('.ripple');
+  const pts=keys.map(k=>({t:k[0],p:typeof k[1]==='string'?target(win,k[1]):k[1]}));
+  let p=pts[0].p;
+  for(let i=0;i<pts.length-1;i++){if(t>=pts[i].t&&t<pts[i+1].t){const k=inOut(clamp((t-pts[i].t)/(pts[i+1].t-pts[i].t)));p=[pts[i].p[0]+(pts[i+1].p[0]-pts[i].p[0])*k,pts[i].p[1]+(pts[i+1].p[1]-pts[i].p[1])*k];}}
+  if(t>=pts[pts.length-1].t)p=pts[pts.length-1].p;
+  const vis=P(t,keys[0][0]-.3,keys[0][0])*(1-P(t,hideAt,hideAt+.3));
+  let press=1;rip.style.opacity=0;
+  for(const c of clicks){const d=t-c;if(d>-.1&&d<.12)press=.82;if(d>=0&&d<.5){rip.style.opacity=1-d/.5;rip.style.transform=`scale(${.4+d*2})`;rip.style.left=p[0]+'px';rip.style.top=p[1]+'px';}}
+  cur.style.opacity=vis;cur.style.transform=`translate(${p[0]-4}px,${p[1]-2}px) scale(${press})`;
+}
+const pressed=(t,c)=>t>=c&&t<c+.15?'scale(.95)':'scale(1)';
+function capIn(sc,t){const c=sc.querySelector('.cap');if(!c)return;[...c.children].forEach((ch,i)=>show(ch,t,.25+i*.18,.7,30));c.querySelector('.bar')&&(c.querySelector('.bar').style.transform+=` scaleX(${P(t,.4,1.1)})`);}
+function winIn(sc,t,zoom=[1,1]){const w=sc.querySelector('.win');if(!w)return;const k=P(t,.1,1.1);const z=zoom[0]+(zoom[1]-zoom[0])*P(t,1,8,x=>x);w.style.opacity=k;w.style.transform=`translate(${(1-k)*80}px,0) scale(${z})`;w.style.transformOrigin='30% 40%';}
+
+// ---------------- scenes ----------------
+const S=[
+ {id:'s1',at:0,fn:t=>{
+   type('#h1a','你有一个想法。',t,.4,1.6);
+   type('#h1b','离一条完整视频，还差多远？',t,2.0,3.8);
+   if(t>1.6&&t<2.0)$('#h1a').innerHTML='你有一个想法。';
+   if(t>3.8+.6)$('#h1b').innerHTML='离一条完整视频，还差多远？';
+   const bars=[...document.querySelectorAll('#wave1 i')];const amp=P(t,1,2.2);
+   bars.forEach((b,i)=>{const beat=Math.exp(-((t%0.5)*7));const h=14+amp*(30+90*Math.abs(Math.sin(i*.55+t*2.2))*(.55+.45*Math.sin(i*.23+t))*(.75+.25*beat));b.style.height=h+'px';b.style.opacity=.35+.65*amp;});
+   show('#h1c',t,4.3,.8,20);
+ }},
+ {id:'s2',at:6,fn:t=>{
+   const k=P(t,0,.9,outBack);$('#blogo').style.transform=`scale(${.4+.6*k}) rotate(${(1-k)*-20}deg)`;$('#blogo').style.opacity=P(t,0,.4);
+   const path=$('#lpath');const L=path.getTotalLength();path.style.strokeDasharray=L;path.style.strokeDashoffset=L*(1-P(t,.3,1.4));
+   const bn=$('#bname');const kb=P(t,.6,1.6);bn.style.opacity=kb;bn.style.letterSpacing=(80-40*kb)+'px';bn.style.filter=`blur(${(1-kb)*12}px)`;
+   show('#bsub',t,1.2,.8,14);show('#btag',t,2,.9,24);
+ }},
+ {id:'s3',at:11,fn:(t,sc)=>{
+   winIn(sc,t,[1,1.03]);capIn(sc,t);
+   const txt='用 60 秒讲清楚：为什么有些歌一听就让人放松，面向不懂乐理的观众';
+   if(t<1.2)$('#s3txt').innerHTML='<span class="ph">例如：用 60 秒讲清楚为什么有些歌一听就让人放松……</span>';else type('#s3txt',txt,t,1.3,4.6);
+   const w=sc.querySelector('.win');cursor(w,t,[[4.6,[640,700]],[5.6,'#s3research'],[7.4,'#s3research']],[6.1]);
+   $('#s3research').style.transform=pressed(t,6.1);
+   if(t>6.1){$('#s3research').style.background='#edf2ea';$('#s3research').style.borderColor='#9fc3a8';}else{$('#s3research').style.background='';$('#s3research').style.borderColor='';}
+   sc.querySelectorAll('.mode').forEach((m,i)=>show(m,t,1.0+i*.15,.7,20));
+ }},
+ {id:'s4',at:19,fn:(t,sc)=>{
+   winIn(sc,t);capIn(sc,t);
+   const grid=$('#s4grid');const phase=t<3.9?1:2;
+   if(grid.dataset.phase!=phase){grid.innerHTML=(phase===1?B1:B1.map((c,i)=>B2[i]||c)).map((c,i)=>card(c,i,false)).join('');grid.dataset.phase=phase;}
+   const fav=t>2.9;const c1=$('#ic1');c1.classList.toggle('fav',fav);c1.querySelector('.fv').textContent=fav?'★ 已收藏':'☆ 收藏';if(fav)c1.querySelector('.fv').style.color='#5b8a3c';
+   [...grid.children].forEach((c,i)=>{
+     if(phase===1){const k=P(t,.8+i*.1,1.4+i*.1);c.style.opacity=k;c.style.transform=`translateY(${(1-k)*40}px)`;
+       if(i!==1){const o=P(t,3.4,3.9,x=>x);if(o>0){c.style.opacity=1-o;c.style.transform=`translateY(${o*-20}px) scale(${1-o*.04})`;}}}
+     else{if(i===1){c.style.opacity=1;c.style.transform='none';return;}const k=P(t,3.95+i*.08,4.6+i*.08);c.style.opacity=k;c.style.transform=`translateY(${(1-k)*30}px) rotateX(${(1-k)*25}deg)`;}
+   });
+   const w=sc.querySelector('.win');cursor(w,t,[[1.8,[700,620]],[2.6,'#ic1 .fv'],[3.0,'#ic1 .fv'],[3.4,'#s4swap'],[6.5,'#s4swap']],[2.85,3.4]);
+   $('#s4swap').style.transform=pressed(t,3.4);
+ }},
+ {id:'s5',at:26,fn:(t,sc)=>{
+   winIn(sc,t);capIn(sc,t);
+   show('#b0',t,.8,.5,16);show('#b1',t,1.5,.5,16);show('#b2',t,3.3,.5,16);show('#b3',t,3.9,.5,16);show('#b4',t,5.4,.5,16);
+   $('#o1a').classList.toggle('sel',t>3.0);$('#o3a').classList.toggle('sel',t>5.1);
+   const fills=[['#f1','不懂乐理的普通听众',3.4],['#f2','听出松弛感从哪来',5.5],['#f3','慢速、稳定、可预期的声音让耳朵放松',6.1],['#f4','轻松、好奇，不说教',6.5],['#f5','能直接听到的对比示例',6.9]];
+   fills.forEach(([s,v,a])=>{const el=$(s);if(t>a){el.textContent=v;el.classList.add('filled');el.style.opacity=.4+.6*P(t,a,a+.4);}else{el.textContent='还没确定';el.classList.remove('filled');el.style.opacity=1;}});
+   const chat=$('#s5chat');chat.scrollTop=0;chat.style.transform=`translateY(${-P(t,3.8,4.4)*0-P(t,5.2,5.8)*0}px)`;
+   const w=sc.querySelector('.win');cursor(w,t,[[2.2,[500,640]],[2.9,'#o1a'],[4.4,'#o1a'],[5.0,'#o3a'],[6.2,'#o3a'],[7.2,'#s5go']],[3.0,5.1]);
+   const g=$('#s5go');const pulse=t>7.2?1+.04*Math.sin((t-7.2)*10):1;g.style.transform=`scale(${pulse})`;g.style.boxShadow=t>7?`0 0 0 ${6*P(t,7,7.4)}px #27785d22`:'none';
+ }},
+ {id:'s6',at:34,fn:(t,sc)=>{
+   winIn(sc,t);capIn(sc,t);
+   const sw=P(t,3.3,3.8);
+   $('#s6a').style.opacity=1-sw;$('#s6a').style.transform=`translateX(${-sw*60}px)`;
+   const b=$('#s6b');b.style.opacity=P(t,3.5,3.9);b.style.transform=`translateX(${(1-P(t,3.5,3.9))*60}px)`;
+   $('#s6t1').classList.toggle('on',t<3.6);$('#s6t2').classList.toggle('on',t>=3.6);
+   ['#d1','#d2','#d3'].forEach((d,i)=>show(d,t,.6+i*.15,.6,30));
+   $('#d1').classList.toggle('sel',t>2.6);$('#d1b').style.transform=pressed(t,2.9);
+   type('#p1t','同一段旋律，我们放两遍。第一遍快、亮、碎；第二遍慢、暖、稳。你更想听完哪一遍？',t,4.0,5.7);
+   type('#p2t','节拍器从 120 降到 72 BPM，画面里的心跳曲线一起慢下来；钢琴音色替换掉合成器。',t,5.9,7.0);
+   type('#p3t','松弛不是玄学：慢一点、稳一点、能猜到下一拍——耳朵就放松了。',t,7.0,7.8);
+   ['#p1','#p2','#p3'].forEach((p,i)=>show(p,t,3.6+i*.15,.5,20));
+   const w=sc.querySelector('.win');cursor(w,t,[[1.6,[520,700]],[2.5,'#d1b'],[3.4,'#d1b']],[2.9],3.2);
+ }},
+ {id:'s7',at:42,fn:(t,sc)=>{
+   winIn(sc,t);capIn(sc,t);
+   type('#s7brief','节奏舒缓。开头 3 秒先放一段快慢对比，用简洁的动态图形解释节拍和音色，结尾留一句金句。',t,.8,3.0);
+   ROWS.forEach((r,i)=>{show('#ar'+i,t,1.2+i*.12,.5,16);const rr=$('#rr'+i);const a=3.0+i*.55;const k=P(t,a,a+.45,outBack);rr.style.transform=`scale(${.6+.4*k})`;rr.style.opacity=clamp(k*1.5);});
+   type('#an1','放在开头',t,4.0,4.5);type('#an3','学它的转场',t,5.2,5.8);
+   if(t<4.0)$('#an1').style.display='none';else $('#an1').style.display='';
+   if(t<5.2)$('#an3').style.display='none';else $('#an3').style.display='';
+   [...$('#s7legend').children].forEach((c,i)=>{const k=P(t,3.0+i*.55,3.45+i*.55,outBack);c.style.opacity=clamp(k*1.5);c.style.transform=`scale(${.6+.4*k})`;});
+   const w=sc.querySelector('.win');cursor(w,t,[[5.8,[600,640]],[6.8,'#s7go'],[7.8,'#s7go']],[7.2]);
+   $('#s7go').style.transform=pressed(t,7.2);
+   
+ }},
+ {id:'s8',at:50,fn:(t,sc)=>{
+   show(sc.querySelector('.title'),t,.1,.7,24);show(sc.querySelector('.term'),t,.3,.8,40);
+   const ph=sc.querySelector('.phone');const kp=P(t,.5,1.4);ph.style.opacity=kp;ph.style.transform=`translateY(${(1-kp)*60}px) rotate(${(1-kp)*4}deg)`;
+   LOG.forEach((l,i)=>{const a=.9+i*.68;show('#lg'+i,t,a,.3,8);const d=$('#lgd'+i);d.textContent=t<a+.5&&i>1&&i<7?'…':'';});
+   $('#s8prog').style.width=(100*P(t,.9,6.4,x=>x))+'%';
+   // preview animation inside the phone
+   const live=P(t,1.5,2.5);
+   const bars=[...document.querySelectorAll('#s8bars i')];const bpm=t<4?120:72;const rate=bpm/60;
+   bars.forEach((b,i)=>{const ph=(t*rate+i*.07)%1;const h=20+live*(40+100*Math.abs(Math.sin(i*.6+t*(t<4?3.2:1.4)))*(1-.5*ph));b.style.height=h+'px';b.style.opacity=.3+.7*live;});
+   $('#s8bpm').textContent=t<4?'♩ = 120 BPM':'♩ = 72 BPM';
+   show('#s8title',t,1.6,.7,20);show('#s8cap',t,4.2,.7,16);
+   const bd=$('#s8badge');const kb=P(t,6.4,6.9,outBack);bd.style.opacity=clamp(kb);bd.style.transform=`scale(${.5+.5*kb})`;
+   ['#v1','#v2','#v3'].forEach((v,i)=>show(v,t,6.8+i*.4,.4,12));
+   $('#v1').classList.toggle('on',t<7.6);$('#v2').classList.toggle('on',t>=7.6);
+ }},
+ {id:'s9',at:59,fn:(t,sc)=>{
+   show(sc.querySelector('.head'),t,.1,.7,24);
+   sc.querySelectorAll('.val').forEach((v,i)=>show(v,t,.5+i*.22,.7,50));show('#s9stack',t,1.8,.7,16);
+ }},
+ {id:'s10',at:64,fn:(t,sc)=>{
+   const k=P(t,.2,1.1,outBack);$('#o1').style.opacity=P(t,.2,.6);$('#o1').style.transform=`scale(${.7+.3*k})`;
+   show('#o2',t,.9,.9,30);show('#o3',t,2.0,.8,20);
+   sc.querySelector('.center').style.opacity=1-P(t,5.0,6.0,x=>x);
+ }},
+];
+const END=70;
+window.render=function(t){
+  S.forEach((s,i)=>{
+    const el=document.getElementById(s.id);const next=S[i+1];
+    const on=t>=s.at&&(!next||t<next.at+.5);
+    el.style.visibility=on?'visible':'hidden';
+    if(!on)return;
+    const lt=t-s.at;const fin=i===0?1:P(lt,0,.5,inOut);
+    el.style.opacity=fin;el.style.zIndex=i;el.style.transform=`scale(${1.025-.025*fin})`;
+    s.fn(lt,el);
+  });
+};
+window.render(0);
+</script>
+</body>
+</html>

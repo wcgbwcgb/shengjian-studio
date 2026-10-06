@@ -1,0 +1,10 @@
+.runtime/
+.venv/
+data/
+.env
+__pycache__/
+.pytest_cache/
+node_modules/
+artifacts/
+.backup/
+*.log

@@ -1,0 +1,90 @@
+/* Product polish layer: loaded last. Shared tokens, readable sizes and states for
+   new UI. Keep overrides here instead of editing the generated v2.css lines. */
+:root{--text-xs:12px;--text-sm:13px;--text-md:14px;--warn:#9a6a2a;--warn-bg:#f7efe2;--danger:#b4472f;--ok:#4f7a3a;--radius:10px}
+
+/* Sidebar contents must never spill out of the fixed panel on short windows. */
+.sidebar{overflow-y:auto}
+.sidebar-bottom .settings-button{width:100%}
+
+/* Readability: status, meta and helper text were 9–11px. */
+.creative-status strong{font-size:var(--text-md);font-weight:600;color:#33503f}
+.creative-status p{font-size:var(--text-sm);color:#5f7357}
+.creative-status.interrupted{background:var(--warn-bg);border:1px solid #ecdcc2}
+.creative-status.interrupted strong{color:#7a5420}
+.creative-status.interrupted p{color:#7d6646}
+.creative-status.interrupted>span{width:28px;height:28px;border-radius:50%;background:#efdcbc;color:#7a5420;display:grid;place-items:center;font-size:15px;font-weight:700;flex-shrink:0}
+.creative-status>.button-row{flex:0 0 auto;flex-wrap:nowrap}
+.studio-meta,.work-info p,.small-note,.section-note,.quiet-label,.paragraph-evidence span,.paragraph-duration,.scene-meta,.cut-meta{font-size:var(--text-xs)}
+.work-row>button{font-size:var(--text-sm)}
+.lock-label{font-size:var(--text-xs);color:#7f8f73}
+
+/* Long-running work: show what has happened and what is happening now. */
+.task-steps{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:5px}
+.task-steps li{position:relative;padding-left:20px;font-size:var(--text-xs);color:#7c8d70;line-height:1.6}
+.task-steps li::before{content:'✓';position:absolute;left:2px;top:0;color:#8fa777;font-size:11px}
+.task-steps li.current{color:#33503f;font-weight:500}
+.task-steps li.current::before{content:'';left:3px;top:5px;width:8px;height:8px;border-radius:50%;border:2px solid #8fa777;border-right-color:transparent;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-detail{margin-top:8px;font-size:var(--text-xs);color:#8b7a5f}
+.error-detail summary{cursor:pointer}
+.error-detail code{display:block;margin-top:6px;padding:8px 10px;background:#fbf7f0;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:160px;overflow:auto}
+
+/* Project rows: honest state and management actions. */
+.work-info{min-width:0;flex:1}
+.work-info h3{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-state{color:#7b8a73}
+.row-state.failed{color:var(--warn);font-weight:500}
+.row-state.working{color:var(--ok);font-weight:500}
+.row-state.working::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:#8fbf6f;margin-right:5px;vertical-align:1px;animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.row-actions{display:flex;gap:2px;opacity:0;transition:opacity .15s}
+.work-row:hover .row-actions,.work-row:focus-within .row-actions{opacity:1}
+@media(hover:none){.row-actions{opacity:1}}
+.danger-text{color:var(--danger)!important}
+button.danger,.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+button.danger:hover{filter:brightness(.95)}
+
+/* Script paragraph header: delete sits next to lock on the right, not mid-row. */
+.script-block-heading .text-button+.lock-label{margin-left:0}
+.script-block-heading .text-button{color:#9a8f80}
+.script-block-heading .text-button:hover{color:var(--danger)}
+
+/* Studio heading: long titles wrap instead of pushing actions off-screen. */
+.studio-heading{gap:16px}
+.studio-heading h1{overflow-wrap:anywhere}
+.studio-heading .button-row{flex-shrink:0}
+
+/* Home */
+.mode-hint{margin:14px auto 0;max-width:760px;text-align:center;font-size:var(--text-xs);color:#7c8a77;line-height:1.8}
+.mode-hint b{color:#3d5a48;font-weight:600}
+.mode-hint span{margin:0 6px;color:#c3cbbd}
+
+/* Offline banner */
+#offline-banner{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:50;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;max-width:min(680px,calc(100vw - 32px));padding:12px 18px;border-radius:var(--radius);background:#3b2a17;color:#f6ead6;box-shadow:0 8px 30px rgba(0,0,0,.18);font-size:var(--text-sm)}
+#offline-banner span{opacity:.85;font-size:var(--text-xs)}
+
+/* Disabled controls must look disabled. */
+button:disabled,button[disabled]{opacity:.5;cursor:not-allowed}
+
+/* Settings readiness summary */
+.readiness{display:grid;gap:8px;margin:0 0 18px}
+.readiness-row{display:flex;align-items:center;gap:10px;font-size:var(--text-sm)}
+.readiness-row b{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px;flex-shrink:0;background:#e4efd9;color:var(--ok)}
+.readiness-row.missing b{background:#f3e2c6;color:var(--warn)}
+.readiness-row small{color:#7c8a77;font-size:var(--text-xs)}
+.advanced-settings{margin-top:4px}
+.advanced-settings>summary{cursor:pointer;padding:14px 4px;font-size:var(--text-sm);color:#5d7064}
+.advanced-settings[open]>summary{margin-bottom:12px}
+
+@media(max-width:600px){
+  .creative-status{flex-wrap:wrap}
+  .creative-status p,.task-steps li{font-size:var(--text-xs)}
+  .creative-status strong{font-size:var(--text-sm)}
+  .creative-status .button-row{width:100%;justify-content:flex-end}
+  .row-actions{display:none}
+  .studio-heading{flex-wrap:wrap}
+  .work-row>button{font-size:var(--text-xs)}
+}
+.work-info p .row-state{margin:0}
+/* Keep the player and its actions in one view on laptop screens. */
+.cut-player video,#preview-player{max-height:min(62vh,640px);width:100%;background:#0f1d18}
