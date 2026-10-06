@@ -40,11 +40,13 @@ def clear_stale(project, *stages):
 
 
 class Creation(BaseModel):
-    idea: str = Field(min_length=1, max_length=12000)
+    idea: str = Field(default='', max_length=12000)
+    name: str = Field(default='', max_length=120)
     intent: str = 'idea'
     duration: int = Field(default=60, ge=10, le=3600)
     aspect: str = '9:16'
     clarify: bool = False
+    start: bool = True  # False: only create the project; the creator starts work inside it.
 
 
 CARD_FIELDS = {'audience': '给谁看', 'goal': '想让观众得到什么', 'core_message': '核心观点', 'tone': '语气风格',
@@ -73,9 +75,12 @@ def submit_research(project):
 
 @router.post('/creations')
 def create(body: Creation):
-    idea = body.idea.strip()
-    if not idea or body.aspect not in ('9:16', '16:9', '1:1'):
-        raise ValueError('请写下一个想法，并选择有效画幅')
+    name = body.name.strip()
+    idea = body.idea.strip() or name
+    if not idea:
+        raise ValueError('请填写项目名称或写下一个想法')
+    if body.aspect not in ('9:16', '16:9', '1:1'):
+        raise ValueError('请选择有效画幅')
     if body.intent not in ('idea', 'research', 'reference', 'discover', 'assets', 'video'):
         raise ValueError('创作入口不支持')
     # A duration or orientation written in the idea wins over the dropdown defaults,
@@ -83,7 +88,8 @@ def create(body: Creation):
     stated = store.effective({'defaults': {'duration': body.duration, 'aspect': body.aspect}}, 'idea', idea)
     duration = stated['duration'] if 10 <= int(stated['duration']) <= 3600 else body.duration
     project = store.put('project', {
-        'name': idea[:80], 'requirements': {'duration': duration, 'aspect': stated['aspect']},
+        'name': (name or idea)[:80], **({'name_custom': True} if name else {}),
+        'requirements': {'duration': duration, 'aspect': stated['aspect']},
         'defaults': store.settings(), 'status': '构思中', 'adopted': {}, 'stale_stages': [],
         'stage_settings': {}, 'stage_prompts': {},
         'workspace': {'idea': idea, 'intent': body.intent},
@@ -98,6 +104,8 @@ def create(body: Creation):
             store.put('source', {'url': url, 'title': '创作参考', 'platform': parsed.hostname,
                                 'verification': 'user_supplied', 'metrics': {}, 'published_at': None,
                                 'evidence_note': '创作者提供的链接，尚未读取', 'collected_at': store.now()}, project['id'])
+    if not body.start:
+        return {'project': project, 'task': None}
     if body.intent == 'video':
         task = jobs.submit(project['id'], 'cli_video', {'prompt': idea}) if claude_cli.cli_command() else None
         return {'project': project, 'task': task, 'needs_cli': not bool(task)}

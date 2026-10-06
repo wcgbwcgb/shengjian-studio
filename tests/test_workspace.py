@@ -69,6 +69,22 @@ class WorkspaceTests(unittest.TestCase):
             time.sleep(.03)
         self.fail('Worker did not complete')
 
+    def test_new_project_with_a_name_is_created_without_starting_work(self):
+        response = self.client.post('/api/creations', json={'name': '老歌翻红', 'idea': '讲老歌为什么在短视频翻红',
+                                                           'duration': 90, 'aspect': '16:9', 'start': False})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertIsNone(body['task'])
+        project = store.get('project', body['project']['id'])
+        self.assertEqual((project['name'], project['name_custom']), ('老歌翻红', True))
+        self.assertEqual(project['workspace']['idea'], '讲老歌为什么在短视频翻红')
+        self.assertEqual(project['requirements'], {'duration': 90, 'aspect': '16:9'})
+        self.assertEqual(store.listing('task', project['id']), [])
+        # The idea is optional: the name stands in for it.
+        named = self.client.post('/api/creations', json={'name': '只有名字', 'start': False}).json()['project']
+        self.assertEqual(named['workspace']['idea'], '只有名字')
+        self.assertEqual(self.client.post('/api/creations', json={'start': False}).status_code, 400)
+
     def test_project_from_the_prompt_only_workbench_opens_with_defaults(self):
         # That version saved only name and idea; the workspace must still open it.
         p = store.put('project', {'name': '街访', 'idea': '街访：单曲循环最久的歌'})

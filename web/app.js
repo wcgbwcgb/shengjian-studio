@@ -2,7 +2,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const stageNames = {home:'开始创作',inspiration:'灵感发现',workspace:'创作工作室',library:'素材库',films:'成片',projects:'我的作品',research:'研究',script:'脚本',edit:'精细剪辑',publish:'发布记录',settings:'设置'};
+const stageNames = {home:'项目',inspiration:'灵感发现',workspace:'创作工作室',library:'素材库',films:'成片',projects:'项目',research:'研究',script:'脚本',edit:'精细剪辑',publish:'发布记录',settings:'设置'};
 const S = {page: 'home', projects: [], selected: localStorage.getItem('studio-project'), detail: null, env: {}, defaults: {}, templates: [], versions: {}, prompts: {}, settings: {}, taskModels: {}, models: [], modelCatalog: [], inspirations: {}, connection: {}, loading: true, library:{assets:[],films:[]}};
 let toastTimer;
 function toast(text, error=false) { $('#toast').textContent=text; $('#toast').className='show'+(error?' error':''); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').className='',5000); }
@@ -74,7 +74,7 @@ function heading(title, description, project=false, eyebrow='YOUR IDEA, YOUR STO
 function render() {
   document.title=`${stageNames[S.page]} · 声间`;
   $('#crumb').textContent=stageNames[S.page];
-  $$('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===S.page));
+  $$('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===(S.page==='projects'?'home':S.page)));
   $('#env-dot').style.background=S.env.ffmpeg&&(S.env.api_configured||S.env.claude_cli?.last_check?.logged_in)?'#a4ce89':'#d7ad6f';
   if(S.loading){$('#content').innerHTML=heading('准备创作空间','正在读取本地项目…');return;}
   if(typeof renderV2==='function' && renderV2())return;
@@ -231,7 +231,7 @@ async function handle(action, el) {
 }
 document.addEventListener('click',async event=>{
   const el=event.target.closest('[data-action],[data-page],#new-project'); if(!el)return;
-  try { if(el.dataset.page) return await navigate(el.dataset.page);if(el.id==='new-project')return navigate('home');el.disabled=true;await handle(el.dataset.action,el); }
+  try { if(el.dataset.page) return await navigate(el.dataset.page);if(el.id==='new-project'){await navigate('home');setTimeout(()=>$('#new-project-name')?.focus(),120);return;}el.disabled=true;await handle(el.dataset.action,el); }
   catch(error){toast(error.message,true);} finally {if(el.isConnected)el.disabled=false;}
 });
 document.addEventListener('change',async event=>{

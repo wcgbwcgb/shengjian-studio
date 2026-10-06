@@ -98,3 +98,16 @@ button:disabled,button[disabled]{opacity:.5;cursor:not-allowed}
 .sent-row strong{font-size:13px;margin-right:8px}
 .sent-row small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
 .creative-status .text-button[data-action="v2-sent-view"]{padding:6px 0 0;font-size:11px}
+.projects-home{max-width:1150px;margin:auto;padding-top:20px}
+.projects-grid-home{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:22px;align-items:start}
+.new-project-card{position:sticky;top:20px}
+.new-project-card h2,.continue-card h2{font-size:17px;margin:0 0 6px}
+.new-project-card .section-note{margin:0 0 18px}
+.new-project-card textarea{resize:vertical;min-height:84px}
+.new-project-submit{width:100%;padding:12px 14px;margin-top:4px}
+.new-project-alt{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.continue-card .section-heading{margin-bottom:12px}
+#project-search{margin-bottom:6px}
+.continue-card .work-list{border:0;padding:0;background:none;border-radius:0}
+.continue-card .work-row:last-child{border-bottom:0}
+@media(max-width:900px){.projects-grid-home{grid-template-columns:minmax(0,1fr)}.new-project-card{position:static}}
