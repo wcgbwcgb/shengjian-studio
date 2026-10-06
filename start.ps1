@@ -5,7 +5,7 @@ try {
     $runningStudio = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/environment" -TimeoutSec 2
     if ($runningStudio.service -eq 'music-studio') {
         $runningSettings = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/settings" -TimeoutSec 2
-        if (-not $runningSettings.capabilities.prompt_library) {
+        if (-not $runningSettings.capabilities.task_snapshots -or -not $runningSettings.capabilities.subscription_text) {
             Write-Host 'An older Studio server is running. Close its original terminal, then run this launcher again.' -ForegroundColor Yellow
             Write-Host 'Refreshing the browser cannot reload the Python backend.'
             exit 1

@@ -1,28 +1,20 @@
-"""Inspiration batches: a library prompt runs in a shared folder and Claude writes ideas.json.
-
-The creator's own signals (dismissed, saved, feedback, already shown) are written as files
-in 偏好/ before each run; the prompt tells Claude to read them.
-"""
+"""Inspiration batches: generated on request, replaced by "another batch", one-step undo, saved favourites."""
 import copy
-import json
 import threading
+from datetime import date
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from . import claude_cli, library, media, store
+from . import catalog, claude_cli, config, media, models, store, text_cli
+from .workspace import create_from_research, ResearchStart, create, Creation
 
 router = APIRouter(prefix='/api/inspirations')
 LOCK = threading.RLock()
 EVENTS = {}
 ACTIVE = ('queued', 'running', 'cancelling')
 PREFS = 'inspiration_prefs'
-PROMPTS = {False: 'inspire', True: 'inspire-web'}
-BATCH_SIZE = 12
-
-
-def folder():
-    return store.DATA / 'inspiration' / claude_cli.WORKDIR
+BATCH_SIZE = 8
 
 
 def prefs():
@@ -46,21 +38,14 @@ def card(idea, saved):
     return dict(idea, kind='idea', saved=idea['id'] in saved, favorite_id=saved.get(idea['id']))
 
 
-def cli_ready():
-    try:
-        return bool(claude_cli.cli_command())
-    except ValueError:
-        return False
-
-
 @router.get('')
 def browse():
     saved = {f['origin_id']: f['id'] for f in favorites()}
     job = latest_job()
     return {'ideas': [card(i, saved) for i in ideas()],
             'favorites': [dict(f['item'], id=f['origin_id'], saved=True, favorite_id=f['id']) for f in favorites()],
-            'previous': len(ideas('previous')), 'configured': cli_ready(),
-            'job': job and {k: job.get(k) for k in ('id', 'status', 'phase', 'error', 'created_at', 'started_at', 'payload', 'output')}}
+            'previous': len(ideas('previous')), 'configured': text_cli.available(),
+            'job': job and {k: job.get(k) for k in ('id', 'status', 'phase', 'error', 'created_at', 'started_at', 'payload')}}
 
 
 class Generate(BaseModel):
@@ -75,18 +60,20 @@ def generate(body: Generate):
         job = latest_job()
         if job and job['status'] in ACTIVE:
             raise ValueError('上一批灵感还在生成，请稍候')
-        if not cli_ready():
-            raise ValueError('请先在设置中连接本机 Claude Code')
-        prompt = library.prompt(PROMPTS[body.web])['body']
-        if body.direction.strip():
-            prompt += '\n\n想探索的方向：' + body.direction.strip()
-        if body.feedback.strip():
-            prompt += '\n\n我对上一批的意见：' + body.feedback.strip()
-        settings = claude_cli.options()
-        task = store.put('task', {'kind': 'inspire', 'project_id': None, 'status': 'running', 'phase': '正在准备',
-                                  'payload': body.model_dump() | {'prompt': prompt}, 'cli_config': settings,
-                                  'model_config': {'engine': 'claude_cli', 'model': settings['model']},
-                                  'logs': [], 'error': None, 'started_at': store.now()})
+        if not text_cli.available():
+            raise ValueError('请先在设置中连接 Claude 订阅或 API 服务')
+        task = {'kind': 'inspire', 'project_id': None, 'status': 'running', 'phase': '正在准备',
+                'payload': body.model_dump(), 'logs': [], 'error': None, 'started_at': store.now()}
+        credential = {}
+        if text_cli.enabled():
+            model = text_cli.resolve('research')
+            task['model_config'] = {'engine': 'claude_cli', 'provider': 'claude', 'model': model, 'billing': 'subscription'}
+            task['cli_config'] = dict(claude_cli.options(), model=model)
+        else:
+            task['model_config'], credential = config.freeze(catalog.resolve('research'))
+        task = store.put('task', task)
+        if credential:
+            store.save_task_credentials(task['id'], credential)
         EVENTS[task['id']] = threading.Event()
         threading.Thread(target=run, args=(task,), daemon=True, name='inspiration').start()
         return task
@@ -100,58 +87,48 @@ def update(task, **values):
         return current
 
 
-def write_preferences(work, preference):
-    lists = {'已出现.md': [i['title'] for i in ideas() + ideas('previous')],
-             '不感兴趣.md': preference['dislikes'][-60:], '反馈.md': preference['feedback'][-8:],
-             '收藏.md': [f['item'].get('title', '') for f in favorites()][:15]}
-    target = work / '偏好'
-    target.mkdir(parents=True, exist_ok=True)
-    for name, items in lists.items():
-        text = '\n'.join('- ' + str(item).replace('\n', ' ') for item in items if str(item).strip())
-        (target / name).write_text(text + '\n' if text else '（暂无）\n', encoding='utf-8')
-
-
-def read_ideas(path):
-    try:
-        data = json.loads(path.read_text(encoding='utf-8-sig'))
-    except (OSError, ValueError):
-        return None
-    items = data.get('ideas') if isinstance(data, dict) else data
-    return items if isinstance(items, list) else None
+def evidence_urls(raw):
+    found = set()
+    for block in raw:
+        content = block.get('content')
+        if block.get('type') == 'web_search_tool_result' and isinstance(content, list):
+            found |= {item.get('url') for item in content if isinstance(item, dict) and item.get('url')}
+        if block.get('type') == 'web_fetch_tool_result' and isinstance(content, dict) and content.get('url'):
+            found.add(content['url'])
+    return found
 
 
 def run(task):
     event = EVENTS[task['id']]
     report = lambda text: update(task, phase=text, logs=(store.get('task', task['id']).get('logs', []) + [{'at': store.now(), 'text': text}])[-50:])
-    payload, preference, work = task['payload'], prefs(), folder()
+    payload, settings = task['payload'], store.settings()
+    preference = prefs()
     try:
-        work.mkdir(parents=True, exist_ok=True)
-        write_preferences(work, preference)
-        output = work / 'ideas.json'
-        output.unlink(missing_ok=True)
-        result = claude_cli.run(task, work, payload['prompt'], event, report)
-        items = read_ideas(output)
-        if items is None:
-            if result['failure']:
-                raise result['failure']
-            raise ValueError('Claude 没有写出 ideas.json' + ('。Claude 的回复：' + result['reply'][:800] if result['reply'] else ''))
-        read = set(result['web'])
+        context = {'web': payload['web'], 'direction': payload['direction'], 'feedback': payload['feedback'],
+                   'audience': settings['audience'], 'style': settings['style'], 'platform': settings['platform'],
+                   'avoid_titles': preference['dislikes'][-60:] + [i['title'] for i in ideas()] + [i['title'] for i in ideas('previous')],
+                   'recent_feedback': preference['feedback'][-8:], 'liked': [f['item'].get('title') for f in favorites()][:15],
+                   'count': BATCH_SIZE, 'today': date.today().isoformat(),
+                   'effective': {'search_limit': settings['search_limit']}}
+        result, raw, _ = models.call(task, 'inspire', context, event, report)
+        if event.is_set():
+            raise media.Cancelled()
+        found = evidence_urls(raw)
         batch = []
-        for item in items:
+        for item in result.get('ideas') or []:
             if not isinstance(item, dict) or not str(item.get('title') or '').strip():
                 continue
             sources = []
-            for source in (item.get('sources') or [])[:5]:
+            for source in (item.get('sources') or [])[:5] if payload['web'] else []:
                 if isinstance(source, dict) and str(source.get('url', '')).startswith('http'):
-                    # Links Claude cites but never opened during this run are labelled as such.
                     sources.append({'url': source['url'], 'title': str(source.get('title') or source['url'])[:200],
-                                    'verification': 'search_only' if source['url'] in read else 'unverified'})
+                                    'verification': 'search_only' if source['url'] in found else 'unverified'})
             batch.append({'title': str(item['title']).strip()[:200], 'description': str(item.get('description') or '').strip()[:600],
                           'hook': str(item.get('hook') or '').strip()[:300], 'format': str(item.get('format') or '').strip()[:100],
                           'tags': [str(t)[:20] for t in (item.get('tags') or [])][:3], 'sources': sources,
                           'web': payload['web'], 'batch_id': task['id']})
         if not batch:
-            raise ValueError('ideas.json 里没有可用的选题，请换个方向再试')
+            raise ValueError('这次没有得到可用的灵感，请换个方向再试')
         with LOCK:
             # Unsaved cards from the batch before last are discarded; the current batch stays undoable once.
             for old in ideas('previous'):
@@ -163,12 +140,11 @@ def run(task):
             if payload['feedback'].strip():
                 preference['feedback'] = (preference['feedback'] + [payload['feedback'].strip()])[-20:]
                 store.preference(PREFS, preference)
-            update(task, status='completed', phase='已完成', finished_at=store.now(),
-                   output={'reply': result['reply'][:3000]})
+            update(task, status='completed', phase='已完成', finished_at=store.now())
     except media.Cancelled:
         update(task, status='cancelled', phase='已取消')
     except Exception as exc:
-        update(task, status='failed', phase='未完成', error=claude_cli.clean(exc)[:2000])
+        update(task, status='failed', phase='未完成', error=str(exc)[:2000])
     finally:
         EVENTS.pop(task['id'], None)
 
@@ -234,12 +210,16 @@ def unfavorite(ident: str):
 
 @router.post('/create')
 def from_inspiration(body: dict):
-    from .projects import new_project
     item = lookup(body.get('id'))
     if not item:
         raise ValueError('灵感不存在')
-    # Favourites saved by earlier versions hold a research topic instead of a title.
-    title = item.get('title') or item.get('topic', {}).get('title') or '新作品'
-    idea = title + ('：' + item['description'] if item.get('description') else '') + \
-        ('\n开场：' + item['hook'] if item.get('hook') else '')
-    return {'project': new_project(title, idea)}
+    clarify = bool(body.get('clarify', True))
+    if item.get('kind') == 'research':
+        # Favourites saved before batches existed keep their original research.
+        try:
+            store.get('version', item['version_id'])
+            return create_from_research(ResearchStart(version_id=item['version_id'], topic_id=item['topic']['id']))
+        except ValueError:
+            pass
+    idea = item['title'] + ('：' + item['description'] if item.get('description') else '')
+    return create(Creation(idea=idea, intent='research', clarify=clarify))

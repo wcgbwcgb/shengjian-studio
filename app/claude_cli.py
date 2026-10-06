@@ -1,4 +1,4 @@
-"""Run the user's Claude Code CLI with a prompt in a working folder; every feature is a different prompt."""
+"""Run the user's unmodified Claude Code CLI with only the user's prompt, and keep its videos as versions."""
 import json
 import math
 import os
@@ -117,7 +117,8 @@ def environment():
 
 
 def clean(value):
-    return re.sub(r'\b(?:sk-ant-|sk-proj-|sk-)[A-Za-z0-9_-]{12,}', '[已隐藏]', str(value))
+    text = config.redact(str(value))
+    return re.sub(r'\b(?:sk-ant-|sk-proj-|sk-)[A-Za-z0-9_-]{12,}', '[已隐藏]', text)
 
 
 def terminate(proc):
@@ -230,12 +231,12 @@ def inspect_cli():
     return status()
 
 
-# Each project has one working folder, like a project opened in Claude Code. Uploaded
-# materials are copied into its 素材 subfolder.
+# Claude gets only the user's prompt and works in one folder per project, like a
+# project opened in Claude Code. Uploaded materials are copied into its subfolder.
 WORKDIR = 'claude'
 MATERIALS = '素材'
 VIDEO_SUFFIXES = {'.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi'}
-SKIP_DIRS = {MATERIALS, '.claude', 'node_modules', '.git', '__pycache__', '.venv', 'venv'}
+SKIP_DIRS = {MATERIALS, 'node_modules', '.git', '__pycache__', '.venv', 'venv'}
 
 
 def material_name(asset, taken):
@@ -284,8 +285,11 @@ def copy_input(source, target, event):
             outgoing.write(chunk)
 
 
-def sync_materials(work, assets, event, report):
-    own = [a for a in assets if not a.get('generated')]
+def prepare(task, event, report):
+    project_id = task['project_id']
+    work = store.project_file(project_id, WORKDIR)
+    work.mkdir(parents=True, exist_ok=True)
+    own = [a for a in task['asset_snapshot'] if not a.get('generated')]
     folder, taken = work / MATERIALS, set()
     if own:
         report('正在放入项目素材')
@@ -301,12 +305,22 @@ def sync_materials(work, assets, event, report):
         for stale in folder.iterdir():
             if stale.is_file() and stale.name.casefold() not in taken:
                 stale.unlink()
-
-
-def prepare(task, work, event, report, assets=None):
-    work.mkdir(parents=True, exist_ok=True)
-    if assets is not None:
-        sync_materials(work, assets, event, report)
+    sources = []
+    if task.get('retry_of'):
+        sources.append(store.get('task', task['retry_of']))
+    base_id = task['payload'].get('base_version_id') or task['upstream'].get('edit')
+    if base_id:
+        base = store.get('version', base_id)
+        if base['project_id'] != project_id or base['stage'] != 'edit':
+            raise ValueError('引用的视频版本不属于当前项目')
+        sources.append(base)
+    # Claude Code stores sessions per working folder; earlier runs used another folder.
+    session = next((s['cli_session_id'] for s in sources if s.get('cli_workdir') == WORKDIR and s.get('cli_session_id')), None)
+    if session:
+        try:
+            session = str(uuid.UUID(session))
+        except (ValueError, TypeError, AttributeError):
+            session = None
     toolbox_python(event, report)
     hook_args = [sys.executable, str(Path(__file__).with_name('cli_guard.py')), '--root', str(work), '--run', str(work),
                  '--toolbox', str(TOOLBOX), '--temp', tempfile.gettempdir(), '--protect-pid', str(os.getpid()),
@@ -315,40 +329,12 @@ def prepare(task, work, event, report, assets=None):
                          'hooks': [{'type': 'command', 'command': hook_args[0],
                                     'args': hook_args[1:], 'timeout': 10}]}]}}
     # Keep policy files outside the agent's writable directories.
-    owner = store.project_dir(task['project_id']) if task.get('project_id') else store.DATA / 'inspiration'
-    control = owner / 'agent-control' / task['id']
+    control = store.project_file(project_id, 'agent-control/' + task['id'])
     control.mkdir(parents=True, exist_ok=True)
     (control / 'settings.json').write_text(json.dumps(runtime_settings), encoding='utf-8')
     (control / 'mcp.json').write_text('{"mcpServers":{}}', encoding='utf-8')
     task_update(task, cli_run_dir=WORKDIR, cli_workdir=WORKDIR)
-    return control
-
-
-class Observer:
-    """What Claude did, shown next to its reply: the web pages it read."""
-
-    def __init__(self):
-        self.urls, self.tools = [], {}
-
-    def collect(self, item):
-        if item.get('type') not in ('assistant', 'user'):
-            return
-        for block in item.get('message', {}).get('content', []) or []:
-            if not isinstance(block, dict):
-                continue
-            if block.get('type') == 'tool_use' and block.get('name') in ('WebSearch', 'WebFetch'):
-                self.tools[block.get('id')] = (block['name'], block.get('input') or {})
-            elif block.get('type') == 'tool_result' and not block.get('is_error'):
-                name, args = self.tools.get(block.get('tool_use_id'), ('', {}))
-                content = block.get('content', '')
-                text = content if isinstance(content, str) else '\n'.join(b.get('text', '') for b in content if isinstance(b, dict))
-                if not name or not text.strip():
-                    continue
-                found = [args['url']] if name == 'WebFetch' and args.get('url') else \
-                    re.findall(r'https?://[^\s<>"\]。，]+', text) if name == 'WebSearch' else []
-                for url in (str(u).rstrip('.,;:)') for u in found):
-                    if url not in self.urls:
-                        self.urls.append(url)
+    return work, control, session
 
 
 def execute_process(task, command, root, prompt, event, report, on_event=None):
@@ -434,19 +420,17 @@ def execute_process(task, command, root, prompt, event, report, on_event=None):
                         name = block.get('name', '')
                         if name in ('WebSearch', 'WebFetch'):
                             phase = '正在搜索参考资料' if name == 'WebSearch' else '正在读取来源原文'
-                        phase = {'Read': '正在查看文件与素材', 'Write': '正在写入文件', 'Edit': '正在修改文件',
+                        phase = {'Read': '正在查看素材与画面', 'Write': '正在编写制作脚本', 'Edit': '正在调整制作方案',
                                  'Glob': '正在查找项目文件', 'Grep': '正在读取项目内容', 'Bash': '正在执行本地制作工具',
                                  'PowerShell': '正在执行本地制作工具', 'Task': '正在分派并行制作任务',
                                  'Agent': '正在分派并行制作任务', 'TodoWrite': '正在规划制作步骤'}.get(name, phase)
                         arg = block.get('input', {}).get('command', '')
                         if name in ('Bash', 'PowerShell'):
-                            phase = '正在安装制作依赖' if re.search(r'(pip|npm|pnpm|yarn).*(install|i|add)', arg) else \
-                                    '正在渲染动画' if re.search(r'remotion|playwright|puppeteer|node', arg) else \
-                                    '正在检查视频信息' if 'ffprobe' in arg or ' probe ' in arg else \
+                            phase = '正在安装制作依赖' if re.search(r'(pip|npm|pnpm|yarn).*(install|i|add)', arg) else                                     '正在渲染动画' if re.search(r'remotion|playwright|puppeteer|node', arg) else                                     '正在检查视频信息' if 'ffprobe' in arg or ' probe ' in arg else \
                                     '正在抽取检查画面' if 'frames' in arg else \
                                     '正在渲染或检查视频' if 'ffmpeg' in arg else phase
             elif item.get('type') == 'system' and item.get('subtype') == 'init':
-                phase = 'Claude Code 已启动，正在理解要求'
+                phase = 'Claude Code 已启动，正在理解' + ('制作要求' if task['kind'] == 'cli_video' else '调研与文案要求')
             elif item.get('type') == 'system' and item.get('subtype') == 'api_retry':
                 phase = 'Claude 服务暂未响应，正在重试连接'
             elif item.get('type') == 'result':
@@ -464,7 +448,8 @@ def execute_process(task, command, root, prompt, event, report, on_event=None):
             record_result(task, result)
         if proc.returncode or not result or result.get('is_error') or result.get('subtype') != 'success':
             detail = result.get('result') or '; '.join(map(str, result.get('errors', []))) if result else tail
-            raise ValueError('Claude Code 没有完成：' + clean(detail or '未收到成功的执行结果')[:2000])
+            operation = '制作' if task['kind'] == 'cli_video' else '调研或文案'
+            raise ValueError('Claude Code 未完成' + operation + '：' + clean(detail or '未收到成功的执行结果')[:2000])
         return result
     finally:
         finished.set()
@@ -486,47 +471,16 @@ def record_result(task, result):
     task_update(task, cli_result=values)
 
 
-def changed_files(work, since):
-    """Files Claude wrote or rewrote during this run, newest first."""
+def newest_video(work, since):
+    """The video Claude wrote or rewrote most recently during this run."""
     found = []
     for folder, dirs, files in os.walk(work):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for name in files:
             path = Path(folder) / name
-            try:
-                mtime = path.stat().st_mtime
-            except OSError:
-                continue
-            if mtime >= since - 2:
-                found.append((mtime, path.relative_to(work).as_posix()))
-    return [p for _, p in sorted(found, reverse=True)]
-
-
-def run(task, work, prompt, event, report, resume=None, assets=None):
-    """Send one prompt to Claude Code in `work`. Nothing is added to the prompt."""
-    settings = task['cli_config']
-    command = cli_command(settings)
-    if not command:
-        raise ValueError('未找到 Claude Code，请在设置中检测本机 CLI')
-    control = prepare(task, work, event, report, assets)
-    # dontAsk denies anything not approved; the PreToolUse hook approves all but destructive actions.
-    args = command + ['-p', '--output-format', 'stream-json', '--verbose', '--model', settings['model'],
-                      '--max-turns', str(settings['max_turns']), '--permission-mode', 'dontAsk',
-                      '--tools', 'default', '--settings', str(control / 'settings.json'),
-                      '--strict-mcp-config', '--mcp-config', str(control / 'mcp.json')]
-    if resume:
-        args += ['--resume', resume, '--fork-session']
-    report('正在启动本机 Claude Code')
-    observer, started, failure, outcome = Observer(), time.time(), None, None
-    try:
-        outcome = execute_process(task, args, work, prompt, event, report, on_event=observer.collect)
-    except ValueError as exc:
-        # A run that stops early may still have produced files worth keeping.
-        failure = exc
-    if event.is_set():
-        raise media.Cancelled()
-    return {'reply': clean((outcome or {}).get('result') or '').strip(), 'failure': failure,
-            'files': changed_files(work, started), 'web': observer.urls}
+            if path.suffix.lower() in VIDEO_SUFFIXES and (mtime := path.stat().st_mtime) >= since - 2:
+                found.append((mtime, path))
+    return max(found)[1] if found else None
 
 
 def save_video(task, source, work, summary, event, report):
@@ -566,42 +520,61 @@ def save_video(task, source, work, summary, event, report):
     return result, artifacts
 
 
-def keep_video(task, source, work, summary, notes, event, report):
-    result, artifacts = save_video(task, source, work, summary, event, report)
-    result['notes'] = notes + result['notes']
+def execute(task, event, report):
+    settings = task['cli_config']
+    command = cli_command(settings)
+    if not command:
+        raise ValueError('未找到 Claude Code，请在设置中检测本机 CLI')
+    if not media.executable('ffmpeg') or not media.executable('ffprobe'):
+        raise ValueError('请先配置 FFmpeg 和 ffprobe，再开始视频制作')
+    work, control, session = prepare(task, event, report)
+    # dontAsk denies anything not approved; the PreToolUse hook approves all but destructive actions.
+    args = command + ['-p', '--output-format', 'stream-json', '--verbose', '--model', settings['model'],
+                      '--max-turns', str(settings['max_turns']), '--permission-mode', 'dontAsk',
+                      '--tools', 'default', '--settings', str(control / 'settings.json'),
+                      '--strict-mcp-config', '--mcp-config', str(control / 'mcp.json')]
+    if session:
+        args += ['--resume', session, '--fork-session']
+    report('正在启动本机 Claude Code')
+    started, failure, outcome = time.time(), None, None
+    try:
+        outcome = execute_process(task, args, work, task['payload']['prompt'], event, report)
+    except ValueError as exc:
+        # A run that stops early may still have produced a video worth keeping.
+        failure = exc
+    if event.is_set():
+        raise media.Cancelled()
+    source = newest_video(work, started)
+    if not source:
+        if failure:
+            raise failure
+        said = clean((outcome or {}).get('result') or '').strip()
+        raise ValueError('Claude Code 已结束，但这次没有生成新的视频文件' + ('。Claude 的回复：' + said[:1500] if said else ''))
+    try:
+        result, artifacts = save_video(task, source, work, (outcome or {}).get('result') or '', event, report)
+    except ValueError:
+        if failure:
+            raise failure from None
+        raise
+    if failure:
+        result['notes'].insert(0, 'Claude Code 没有正常结束（' + clean(str(failure))[:300] + '），这是它停止前生成的视频，请检查是否完整。')
     from . import jobs
-    current = store.get('task', task['id'])
+    current_task = store.get('task', task['id'])
+    v = jobs.version(task, 'edit', result, task['payload'].get('base_version_id') or task['upstream'].get('edit'),
+                     {'engine': 'claude_cli', 'model': settings['model']})
+    v.update(preview=artifacts, final=artifacts, cli_session_id=current_task.get('cli_session_id'),
+             cli_result=current_task.get('cli_result'), cli_run_dir=WORKDIR, cli_workdir=WORKDIR)
     with jobs.LOCK:
         if event.is_set():
             raise media.Cancelled()
-        v = store.put('version', {'stage': 'edit', 'result': result, 'prompt': task['payload']['prompt'],
-                      'task_id': task['id'], 'preview': artifacts, 'final': artifacts,
-                      'cli_session_id': current.get('cli_session_id'), 'cli_result': current.get('cli_result'),
-                      'cli_run_dir': WORKDIR, 'cli_workdir': WORKDIR,
-                      'model_config': {'engine': 'claude_cli', 'model': task['cli_config']['model']}}, task['project_id'])
+        store.put('version', v, task['project_id'])
         p = store.get('project', task['project_id'])
-        p.setdefault('adopted', {})['edit'] = v['id']
-        store.put('project', p)
-    return v
-
-
-def execute(task, event, report):
-    """A project run: the prompt goes to Claude; a new video also becomes a playable version."""
-    work = store.project_file(task['project_id'], WORKDIR)
-    result = run(task, work, task['payload']['prompt'], event, report, task.get('resume_session'), task['asset_snapshot'])
-    failure, warnings = result.pop('failure'), []
-    if failure and not result['files']:
-        raise failure
-    if failure:
-        warnings.append('Claude Code 没有正常结束（' + clean(str(failure))[:300] + '），这些是它停止前留下的内容，请检查是否完整。')
-    videos = [p for p in result['files'] if Path(p).suffix.lower() in VIDEO_SUFFIXES]
-    version = None
-    if videos and media.executable('ffmpeg') and media.executable('ffprobe'):
-        try:
-            version = keep_video(task, work / videos[0], work, result['reply'], list(warnings), event, report)
-        except ValueError as exc:
-            warnings.append(f'生成的视频 {videos[0]} 无法保存为版本：' + clean(str(exc))[:300])
-    elif videos:
-        warnings.append('还没有配置 FFmpeg，视频留在工作文件夹里，没有保存为可播放的版本。')
-    return {**result, 'files': result['files'][:200], 'web': result['web'][:50], 'warnings': warnings,
-            'version_id': version['id'] if version else None}
+        if not v['stale']:
+            p.setdefault('workspace', {'idea': p['name']})['edit_version'] = v['id']
+            p['adopted']['edit'] = v['id']
+            p['stale_stages'] = [s for s in p.get('stale_stages', []) if s != 'edit']
+            p['status'] = '待审片'
+            store.put('project', p)
+        store.put('message', {'stage': 'edit', 'role': 'assistant', 'text': result['summary'],
+                             'version_id': v['id'], 'task_id': task['id']}, task['project_id'])
+    return {'version_id': v['id'], 'artifacts': artifacts, 'cli_session_id': v['cli_session_id']}

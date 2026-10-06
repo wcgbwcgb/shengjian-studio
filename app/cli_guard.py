@@ -184,7 +184,7 @@ def decide(event, root, run, executables, toolbox=None, temp=None, protect_pid=N
         if not isinstance(command, str):
             return False, '命令格式不正确'
         return check_command(command, cwd, roots, temp, protect_pid, executables.get('workbench_python'), project_env)
-    # Web, agents, todos and other tools are unrestricted.
+    # Web, agents, todos, skills and other tools are unrestricted.
     return True, '允许'
 
 

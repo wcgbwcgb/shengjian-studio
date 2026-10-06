@@ -1,125 +1,173 @@
-// End-to-end browser check against the real server with a fake Claude Code.
-// Run: node scripts/check-ui.mjs  (needs Chrome; set CHROME_PATH if it is elsewhere)
+// Real FastAPI/store/worker/renderer; only AI responses are deterministic fixtures.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {browser,sleep} from './browser.mjs';
-
-const root=path.resolve(import.meta.dirname,'..'),port=8878,base=`http://127.0.0.1:${port}`;
-const data=path.join(root,'artifacts','ui-check-'+Date.now());
+const root=path.resolve(import.meta.dirname,'..'),data=path.join(root,'artifacts',`v2-test-${Date.now()}`),base='http://127.0.0.1:8877';
 await fs.mkdir(data,{recursive:true});
-const server=spawn(path.join(root,'.venv','Scripts','python.exe'),[path.join(root,'scripts','cli_fixture.py')],{
-  cwd:root,env:{...process.env,MEDIA_DATA_DIR:data,CLI_TEST_PORT:String(port)},windowsHide:true,stdio:['ignore','pipe','pipe']});
-let log='';server.stdout.on('data',d=>{log+=d});server.stderr.on('data',d=>{log+=d});
-let b;const checks=[];
-const click=selector=>`(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(!el)throw new Error('missing '+${JSON.stringify(selector)});el.click();})()`;
-try {
-  let ready=false;
-  for(let i=0;i<200;i++){try{ready=(await fetch(base+'/api/environment')).ok;if(ready)break;}catch{}await sleep(100);}
-  assert.ok(ready,log);
-  b=await browser(root,9238);
-  const {cdp,evaluate,waitFor,shot,errors}=b;
-  await cdp('Page.navigate',{url:base});
-  await waitFor(`!!document.querySelector('#creation-idea')&&!!document.querySelector('[data-action="use-prompt"]')`);
-  await shot('ui-home');
+const backend=spawn(path.join(root,'.venv','Scripts','python.exe'),['scripts/v2_fixture.py'],{cwd:root,env:{...process.env,MEDIA_DATA_DIR:data,V2_TEST_PORT:'8877'},windowsHide:true,stdio:['ignore','pipe','pipe']});
+let log='',b;backend.stdout.on('data',c=>log+=c);backend.stderr.on('data',c=>log+=c);
+const checks=[];function pass(name){checks.push(name);console.log('PASS:',name);}
+try{
+  let ready=false;for(let i=0;i<80;i++){try{if((await fetch(base+'/api/projects')).ok){ready=true;break;}}catch{}await sleep(100);}
+  if(!ready)throw new Error('Backend failed: '+log);
+  b=await browser(root);const {cdp,evaluate,waitFor,shot}=b;
+  const click=s=>evaluate(`document.querySelector(${JSON.stringify(s)}).click()`);
+  const fill=(s,t)=>evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(s)});el.value=${JSON.stringify(t)};el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await cdp('Page.navigate',{url:base});await waitFor(`!!document.querySelector('#creation-idea')`);
+  assert.equal(await evaluate(`document.querySelectorAll('.metric').length`),0);
+  assert.equal(await evaluate(`document.querySelectorAll('.opportunity-card').length`),0);
+  await click('[data-page="inspiration"]');assert.equal(await evaluate(`document.querySelectorAll('.opportunity-card').length`),0);assert.equal(await evaluate(`!!document.querySelector('#creation-idea')`),false);
+  await fill('#inspire-direction','音乐');await click('[data-action="v2-inspire"][data-web="0"]');
+  await waitFor(`document.querySelectorAll('.idea-card').length===3&&document.querySelector('.idea-card h3').textContent.includes('第1批')`);
+  await shot('v2-inspiration');
+  await click('[data-action="v2-inspire-dismiss"]');await waitFor(`document.querySelectorAll('.idea-card').length===2`);
+  await click('[data-action="v2-favorite"]');await waitFor(`document.querySelector('[data-action="v2-favorite"]').textContent.includes('已收藏')`);
+  await fill('#inspire-feedback','太学术了');await click('[data-action="v2-inspire"][data-web="0"]');
+  await waitFor(`document.querySelectorAll('.idea-card').length===3&&document.querySelector('.idea-card h3').textContent.includes('第2批')`);
+  await click('[data-action="v2-inspire-undo"]');await waitFor(`document.querySelector('.idea-card h3')?.textContent.includes('第1批')`);
+  assert.equal(await evaluate(`document.querySelectorAll('.idea-card').length`),2);
+  await click('[data-action="v2-inspiration-tab"][data-tab="saved"]');assert.equal(await evaluate(`document.querySelectorAll('.idea-card').length`),1);
+  const prefs=await(await fetch(base+'/api/inspirations')).json();assert.equal(prefs.favorites.length,1);
+  pass('Inspiration batches: generate, dismiss, favorite, replace with feedback, undo');
+  await click('[data-page="home"]');
+  assert.equal(await evaluate(`document.querySelector('#content').textContent.includes('API')`),false);
+  assert.equal(await evaluate(`document.querySelector('#creation-clarify').checked`),true);
+  await shot('v2-home');await click('[data-action="v2-create"]');
+  await waitFor(`document.querySelector('#toast').textContent.includes('写下一句话')`);
+  assert.equal((await(await fetch(base+'/api/projects')).json()).length,0);
+  pass('Idea-first home and empty-input validation');
 
-  // A prompt button only fills the box; the box is what gets sent.
-  await evaluate(`document.querySelector('#creation-idea').value='城市夜跑';document.querySelector('[data-action="use-prompt"][data-id="research"]').click()`);
-  const filled=await evaluate(`document.querySelector('#creation-idea').value`);
-  assert.ok(filled.startsWith('围绕下面的想法做调研')&&filled.trimEnd().endsWith('城市夜跑'),filled);
-  checks.push('prompt chip fills the home box');
-  await evaluate(click('[data-action="create-project"]'));
-  await waitFor(`location.hash.startsWith('#workspace/')&&!!document.querySelector('#conversation .turn')`);
-  await waitFor(`!!document.querySelector('#conversation .turn-video video')`,30000);
-  assert.equal(await evaluate(`S.detail.tasks[0].payload.prompt`),filled);
-  assert.equal(await evaluate(`S.detail.project.name`),'城市夜跑');
-  assert.match(await evaluate(`document.querySelector('.turn-reply').textContent`),/调研写在/);
-  assert.ok(await evaluate(`[...document.querySelectorAll('.file-row')].some(el=>el.textContent.includes('需求.md'))`));
-  await evaluate(`document.querySelector('#conversation video').muted=true;document.querySelector('#conversation video').play()`);
-  await waitFor(`document.querySelector('#conversation video').currentTime>.2`);
-  await evaluate(`document.querySelector('#conversation video').pause()`);
-  await shot('ui-workspace');checks.push('run shows reply, files and a playable video');
+  await fill('#creation-idea','为什么有些歌，一听就让人松弛？');await click('[data-action="v2-create"]');
+  await waitFor(`!!document.querySelector('.clarify-view .chat-question')`);
+  assert.equal(await evaluate(`document.querySelector('[data-card-field="goal"]').value`),'让观众听出松弛感从哪里来');
+  assert.equal(await evaluate(`document.querySelectorAll('.angle-card').length`),0);
+  await shot('v2-clarify');
+  await evaluate(`(()=>{const el=document.querySelector('[data-card-field="avoid"]');el.value='乐理术语';el.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await waitFor(`wcontext().card?.avoid==='乐理术语'`);
+  await click('[data-action="v2-chat-option"]');
+  await waitFor(`!!document.querySelector('[data-action="v2-chat-action"]')`);
+  assert.equal(await evaluate(`document.querySelector('[data-card-field="audience"]').value`),'不懂乐理的普通听众');
+  assert.equal(await evaluate(`document.querySelectorAll('.chat-bubble.user').length`),2);
+  pass('Clarifying conversation: one question at a time, clickable options, live requirements card');
+  await click('[data-action="v2-chat-action"]');
+  await waitFor(`document.querySelectorAll('.angle-card').length===3`);
+  const projectId=await evaluate('S.selected');assert.equal((await(await fetch(base+'/api/projects')).json()).length,1);
+  const research=(await(await fetch(base+`/api/projects/${projectId}`)).json()).tasks.find(t=>t.kind==='research');
+  assert.ok(research.payload.prompt.includes('要避免：乐理术语'));assert.ok(research.payload.prompt.includes('给谁看：不懂乐理的普通听众'));
+  pass('Proposed research runs with the confirmed requirements');
 
-  // Editing a file Claude wrote.
-  await evaluate(`[...document.querySelectorAll('.file-row')].find(el=>el.textContent.includes('需求.md')).click()`);
-  await waitFor(`!!document.querySelector('#file-editor')`);
-  await evaluate(`document.querySelector('#file-editor').value='# 我改过的需求';document.querySelector('[data-action="save-file"]').click()`);
-  await waitFor(`!document.querySelector('#modal').open`);
-  assert.equal(await evaluate(`fetch(workURL('需求.md')).then(r=>r.text())`),'# 我改过的需求');
-  checks.push('file editor saves back to the working folder');
+  await fill('#angle-feedback','都太像讲课了');await click('[data-action="v2-more-angles"]');
+  await waitFor(`document.querySelectorAll('.angle-card').length===5`);
+  assert.equal(await evaluate(`document.querySelectorAll('.angle-card')[3].textContent.includes('从一次排练讲起')`),true);
+  await click('[data-action="v2-chat-toggle"]');await waitFor(`document.querySelector('.chat-drawer').classList.contains('open')`);
+  assert.equal(await evaluate(`[...document.querySelectorAll('.chat-drawer .chat-bubble.user')].some(b=>b.textContent.includes('都太像讲课了'))`),true);
+  await fill('#chat-input','还是想更个人化一点');await click('[data-action="v2-chat-send"]');
+  await waitFor(`[...document.querySelectorAll('.chat-drawer [data-action="v2-chat-action"]')].length===1`);
+  assert.equal(await evaluate(`document.querySelector('.chat-drawer').classList.contains('open')`),true);
+  await shot('v2-chat-drawer');
+  await click('.chat-drawer [data-action="v2-chat-action"]');await waitFor(`document.querySelectorAll('.angle-card').length===7`);
+  await click('[data-action="v2-chat-toggle"]');
+  pass('More directions from feedback, conversation drawer and proposed actions');
+  await shot('v2-research');await click('[data-action="v2-evidence"]');await waitFor(`document.querySelector('#modal').open`);
+  assert.equal(await evaluate(`document.querySelector('#modal-content').textContent.includes('待核实')`),true);
+  await click('[data-action="close-modal"]');pass('Automatic research, three angles and inspectable evidence');
 
-  // 调研 tab: research.json and directions.json.
-  await evaluate(click('[data-action="workspace-tab"][data-tab="research"]'));
-  await waitFor(`location.hash.endsWith('/research')&&!!document.querySelector('.research-overview')`);
-  assert.equal(await evaluate(`document.querySelector('.research-title').textContent`),'城市夜跑为什么流行');
-  assert.equal(await evaluate(`document.querySelectorAll('.fact-list>div').length`),2);
-  assert.match(await evaluate(`document.querySelector('.fact-list').textContent`),/未核实/);
-  assert.equal(await evaluate(`document.querySelectorAll('.angle-card').length`),2);
-  assert.ok(await evaluate(`!!document.querySelector('#tab-body [data-action="use-prompt"][data-id="more-directions"]')`));
-  await shot('ui-research');checks.push('调研 tab shows research.json and direction cards');
+  await click('[data-action="v2-angle"]');await waitFor(`document.querySelectorAll('[data-script-text]').length===3`);
+  assert.equal(await evaluate('S.selected'),projectId);await shot('v2-script');
+  await fill('[data-script-text="hook"]','这是我亲手修改过的开场。');await waitFor(`document.querySelector('#draft-status')?.textContent==='已保存'`);
+  await click('[data-action="v2-tab"][data-tab="research"]');await click('[data-action="v2-tab"][data-tab="script"]');
+  assert.equal(await evaluate(`document.querySelector('[data-script-text="hook"]').value`),'这是我亲手修改过的开场。');
+  assert.equal(await evaluate(`document.querySelector('[data-paragraph="hook"]').textContent.includes('请复核引用')`),true);
+  pass('Angle-to-script generation and persistent direct editing with evidence review flags');
 
-  // A direction card fills the composer with the script prompt; nothing is sent yet.
-  const before=await evaluate(`S.detail.tasks.length`);
-  await evaluate(click('[data-action="use-direction"]'));
-  const composer=await evaluate(`document.querySelector('#composer').value`);
-  assert.ok(composer.includes('从一次夜跑讲城市的松弛感')&&composer.includes('脚本.md'),composer);
-  assert.equal(await evaluate(`S.detail.tasks.length`),before);
-  assert.equal(await evaluate(`document.querySelector('#composer-continue').checked`),true);
-  await evaluate(click('[data-action="send"]'));
-  await waitFor(`S.detail.tasks.length===${before+1}&&location.hash.endsWith('/conversation')&&document.querySelectorAll('#conversation .turn').length===2`);
-  await waitFor(`!S.detail.tasks.some(t=>['queued','running'].includes(t.status))`,30000);
-  assert.equal(await evaluate(`S.detail.tasks[0].payload.prompt`),composer.trim());
-  assert.equal(await evaluate(`S.detail.tasks[0].payload.fresh`),false);
-  assert.equal(await evaluate(`document.querySelector('#composer').value`),'');
-  checks.push('direction → composer → follow-up run in the same conversation');
+  await click('[data-action="v2-rewrite"][data-id="hook"][data-instruction="更自然"]');
+  await waitFor(`document.querySelector('[data-script-text="hook"]')?.value==='同一段旋律，听听这次有什么不同？'`);
+  assert.equal(await evaluate(`document.querySelector('[data-script-text="evidence"]').value`),'先别急着找术语，我们听一遍，再听另一种演奏。');
+  pass('Contextual rewriting preserves other paragraphs');
 
-  // 文案 tab: 脚本.md rendered, rewrite buttons are prompts, whole-document edit.
-  await evaluate(click('[data-action="workspace-tab"][data-tab="script"]'));
-  await waitFor(`!!document.querySelector('.markdown-body h3')`);
-  assert.equal(await evaluate(`document.querySelector('.markdown-body h3').textContent`),'01 开场');
-  assert.ok(await evaluate(`!!document.querySelector('.markdown-body a[href="https://example.org/a"]')`));
-  await evaluate(click('#tab-body [data-action="use-prompt"][data-id="script-shorter"]'));
-  assert.match(await evaluate(`document.querySelector('#composer').value`),/压缩/);
-  await evaluate(`document.querySelector('#composer').value=''`);
-  await shot('ui-script');
-  await evaluate(click('[data-action="script-edit"]'));
-  await waitFor(`!!document.querySelector('#script-editor')`);
-  await evaluate(`document.querySelector('#script-editor').value='# 脚本\\n\\n## 改过的开场\\n\\n大家好';document.querySelector('#script-editor').dispatchEvent(new Event('input',{bubbles:true}))`);
-  await evaluate(click('[data-action="script-save"]'));
-  await waitFor(`document.querySelector('.markdown-body h3')?.textContent==='改过的开场'`);
-  assert.equal(await evaluate(`fetch(workURL('脚本.md')).then(r=>r.text())`),'# 脚本\n\n## 改过的开场\n\n大家好');
-  checks.push('文案 tab renders 脚本.md, rewrite buttons fill the box, edits save');
+  await click('[data-action="v2-to-video"]');await waitFor(`!!document.querySelector('.video-brief')`);
+  assert.equal(await evaluate(`document.querySelectorAll('.scene-card').length`),0);
+  assert.equal(await evaluate(`!!document.querySelector('#brief-use-script')`),false);
+  assert.equal(await evaluate(`document.querySelector('details[data-advanced]').open`),false);
+  await shot('v2-video-brief');pass('Script hands off to the video brief; scenes stay in closed advanced options');
 
-  // Prompt library: edit a prompt and see the chip change.
-  await evaluate(click('[data-page="prompts"]'));
-  await waitFor(`!!document.querySelector('[data-action="edit-prompt"]')&&document.querySelectorAll('.library-item').length>8`);
-  await shot('ui-prompts');
-  await evaluate(click('[data-action="edit-prompt"][data-id="from-scratch"]'));
-  await waitFor(`!!document.querySelector('#prompt-body')`);
-  await evaluate(`document.querySelector('#prompt-label').value='纯动画';document.querySelector('#prompt-body').value='只用动画，主题：';document.querySelector('[data-action="save-prompt"]').click()`);
-  await waitFor(`S.prompts.find(p=>p.id==='from-scratch').label==='纯动画'`);
-  await evaluate(click('[data-page="home"]'));
-  await waitFor(`[...document.querySelectorAll('[data-action="use-prompt"]')].some(el=>el.textContent==='纯动画')`);
-  checks.push('prompt edits change the buttons');
+  await evaluate(`document.querySelector('details[data-advanced] summary').click()`);
+  await click('[data-action="v2-build-scenes"]');await waitFor(`document.querySelectorAll('.scene-card').length===3`);
+  assert.equal(await evaluate(`document.querySelector('details[data-advanced]').open`),true);
+  await shot('v2-scenes');await click('[data-action="v2-scene-duration"]');await fill('#scene-duration','2');
+  await click('[data-action="v2-save-duration"]');await waitFor(`!document.querySelector('#modal').open`);
+  assert.equal(await evaluate(`wversion('scenes').result.scenes[1].start`),2);
+  pass('Script-to-scenes conversion and downstream timing recalculation');
 
-  for(const page of ['inspiration','projects','films','library','settings']){
-    await evaluate(click(`[data-page="${page}"]`));
-    await waitFor(`S.page===${JSON.stringify(page)}&&!!document.querySelector('.page-heading,.collection-shell')`);
-    if(page==='films')assert.equal(await evaluate(`document.querySelectorAll('.library-card video').length`),2);
+  const pixels='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP0cAAAAASUVORK5CYII=';
+  const form=new FormData();form.append('file',new Blob([Buffer.from(pixels,'base64')],{type:'image/png'}),'画面.png');
+  const uploaded=await(await fetch(base+`/api/projects/${projectId}/assets`,{method:'POST',body:form})).json();assert.equal(uploaded.kind,'image');
+  await evaluate('refresh()');await click('[data-action="v2-asset-picker"]');await waitFor(`document.querySelector('#modal').open`);
+  await click(`[data-action="v2-choose-asset"][data-id="${uploaded.id}"]`);await waitFor(`!document.querySelector('#modal').open`);
+  assert.equal(await evaluate(`wversion('scenes').result.scenes[0].asset_id`),uploaded.id);
+  pass('Actual image upload and visual asset replacement');
+
+  await waitFor(`!!document.querySelector('[data-brief-asset="${uploaded.id}"]')`);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-brief-role],[data-brief-note]').length`),0);
+  pass('Video brief lists materials without extra role rules');
+
+  const env=await(await fetch(base+'/api/environment')).json();
+  if(env.ffmpeg&&env.ffprobe){
+    await evaluate(`(async()=>{for(const scene of wversion('scenes').result.scenes.slice(1))await patchScene(scene.id,{duration:2});})()`);
+    await click('[data-action="v2-first-cut"]');await waitFor(`!!document.querySelector('#cut-player')`,60000);
+    await waitFor(`document.querySelector('#cut-player').readyState>=2`,20000);
+    assert.equal(await evaluate(`!!wversion('edit').preview.checks.decodable`),true);
+    assert.equal(await evaluate(`wversion('edit').result.segments.length`),3);
+    assert.equal(await evaluate(`wversion('edit').result.has_recorded_audio`),false);
+    await evaluate(`document.querySelector('#cut-player').play()`);
+    await waitFor(`document.querySelector('#cut-player').currentTime>.3`);
+    await evaluate(`document.querySelector('#cut-player').pause();document.querySelector('#cut-player').currentTime=3`);
+    await waitFor(`!document.querySelector('#cut-player').seeking&&document.querySelector('#cut-player').readyState>=2`);
+    await shot('v2-first-cut');
+    await click('[data-action="v2-export"]');await waitFor(`!!document.querySelector('.download-primary')`,60000);
+    const response=await fetch(await evaluate(`document.querySelector('.download-primary').href`));
+    assert.equal(response.status,200);assert.ok((await response.arrayBuffer()).byteLength>1000);
+    pass('Real FFmpeg first cut, playable MP4, no automatic captions, HD export and ZIP download');
+  }else console.log('SKIP: FFmpeg/FFprobe unavailable');
+
+  await click('[data-action="v2-tab"][data-tab="script"]');await fill('[data-script-text="hook"]','上游修改后，分镜应该自动同步。');
+  await waitFor(`document.querySelector('#draft-status')?.textContent==='已保存'`);
+  await click('[data-action="v2-tab"][data-tab="video"]');await evaluate('refresh()');
+  assert.equal(await evaluate(`wversion('scenes').result.scenes[0].narration`),'上游修改后，分镜应该自动同步。');
+  if(env.ffmpeg)assert.equal(await evaluate(`wproject().stale_stages.includes('edit')`),true);
+  pass('Upstream edits synchronize scenes and retain previous cuts as stale versions');
+
+  await click('[data-action="v2-history"]');await waitFor(`document.querySelector('#modal').open`);
+  const old=await evaluate(`S.detail.versions.filter(v=>v.stage==='script').at(-1).id`);
+  await click(`[data-action="v2-inspect-version"][data-id="${old}"]`);await click('[data-action="v2-restore-script"]');
+  await waitFor(`!document.querySelector('#modal').open && !!document.querySelector('[data-script-text="hook"]')`);
+  assert.equal(await evaluate(`document.querySelector('[data-script-text="hook"]').value`),'同一段旋律，为什么第二遍突然变松弛了？');
+  pass('History restores an earlier script as a new branch');
+
+  await evaluate(`(async()=>{const base=wversion('script'),pending=structuredClone(base.result),newer=structuredClone(base.result);pending.paragraphs[0].text='我尚未同步的表达。';newer.paragraphs[0].text='另一处的新版本。';localStorage.setItem(draftKey(S.selected),JSON.stringify({parent_id:base.id,result:pending,revision:Date.now()}));await api('/projects/'+S.selected+'/workspace/script',{parent_id:base.id,result:newer});await refresh();})()`);
+  assert.equal(await evaluate(`!!document.querySelector('[data-action="v2-keep-draft"]')`),true);
+  await click('[data-action="v2-keep-draft"]');
+  await waitFor(`!document.querySelector('[data-action="v2-keep-draft"]')`);
+  assert.equal(await evaluate(`document.querySelector('[data-script-text="hook"]').value`),'我尚未同步的表达。');
+  pass('Concurrent script updates present an explicit choice and retain the selected draft');
+
+  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  for(const tab of ['research','script','video']){
+    await click(`[data-action="v2-tab"][data-tab="${tab}"]`);
+    assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth+1`),true,`Mobile overflow: ${tab}`);
+    await shot('v2-mobile-'+tab);
   }
-  await evaluate(click('[data-page="settings"]'));
-  await waitFor(`!!document.querySelector('#cli-path')&&!!document.querySelector('#ffmpeg-path')`);
-  await shot('ui-settings');checks.push('every page renders');
+  await click('[data-page="home"]');await waitFor(`!!document.querySelector('#creation-idea')`);
+  assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth+1`),true);await shot('v2-mobile-home');
+  pass('390px layouts fit home, research, script and video');
 
-  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:2,mobile:true});
-  await evaluate(`location.hash='#workspace/'+S.selected`);
-  await waitFor(`!!document.querySelector('#composer')`);
-  assert.ok(await evaluate(`document.documentElement.scrollWidth<=window.innerWidth+1`),'horizontal overflow on phone width');
-  await shot('ui-workspace-phone');checks.push('workspace fits a phone screen');
-
-  assert.deepEqual(errors,[]);
-  console.log('UI check passed:\n- '+checks.join('\n- '));
-} catch(error) {
-  console.error(error);console.error(log.slice(-3000));process.exitCode=1;
-} finally {b?.close();server.kill();}
+  for(const page of ['projects','library','films','settings','publish']){await click(`[data-page="${page}"]`);assert.equal(await evaluate(`!!document.querySelector('h1')`),true,page);}
+  assert.deepEqual(b.errors,[]);pass('All supporting routes render without uncaught browser errors');
+  await fs.writeFile(path.join(root,'artifacts','v2-browser-results.json'),JSON.stringify({checks,realRendering:!!env.ffmpeg,dataDirectory:data,browserErrors:b.errors},null,2));
+  console.log(`PASS: ${checks.length} groups. Data: ${data}`);
+}catch(error){
+  if(b){await b.shot('v2-failure').catch(()=>{});console.error(await b.evaluate(`JSON.stringify({page:S.page,tab:W.tab,task:S.detail?.tasks?.[0],text:document.querySelector('#content')?.textContent?.slice(0,1000)})`).catch(()=>''));}
+  console.error(log);throw error;
+}finally{b?.close();backend.kill();}

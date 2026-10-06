@@ -47,14 +47,21 @@ def file(asset, relative=None):
     return target
 
 
+def rules(asset):
+    asset = describe(asset)
+    if asset['type'] == 'Music' and asset.get('analysis', {}).get('duration'):
+        asset['protected'] = [{'start': 0, 'end': asset['analysis']['duration']}]
+    return asset
+
+
 def migrate():
     for asset in store.listing('asset'):
         if 'type' not in asset or 'scope' not in asset or 'storage_project_id' not in asset:
-            store.put('asset', describe(asset))
+            store.put('asset', rules(asset))
 
 
 def update(ident, body):
-    from . import jobs
+    from . import jobs, timeline
     with jobs.LOCK:
         asset = describe(store.get('asset', ident))
         old_owner, old_type = asset.get('project_id'), asset['type']
@@ -67,13 +74,39 @@ def update(ident, body):
                 raise ValueError('项目素材需要选择项目')
             store.get('project', owner)
         for task in store.listing('task'):
-            # Materials are copied into the working folder when a run starts.
-            if task['status'] in ('queued', 'running', 'cancelling') and task.get('project_id') and                     task['project_id'] in {old_owner, owner}:
-                raise ValueError('相关作品正在制作中，请完成或取消后再修改素材')
-        asset.update(scope=scope, project_id=owner, type=validate_type(body.get('type', old_type), Path(asset['path']).suffix))
+            # Inspiration batches belong to no project and use no media.
+            if task['status'] in ('queued', 'running', 'cancelling') and task.get('kind') != 'inspire' and (
+                    task.get('project_id') in {old_owner, owner} or any(a['id'] == ident for a in task.get('asset_snapshot', []))):
+                raise ValueError('相关素材任务执行中，请完成或取消后再修改素材')
+        value = validate_type(body.get('type', old_type), Path(asset['path']).suffix)
+        asset.update(scope=scope, project_id=owner, type=value)
+        if old_type == 'Music' and value != 'Music':
+            asset['protected'] = []
         if 'name' in body:
             name = str(body['name']).strip()
             if not name or len(name) > 200:
                 raise ValueError('素材名称应为 1–200 字')
             asset['name'] = name
-        return store.put('asset', asset)
+        if 'provenance' in body:
+            asset['provenance'] = str(body['provenance'])[:2000]
+        if 'protected' in body:
+            if value == 'Music':
+                raise ValueError('Music 类型默认完整保护')
+            if not asset.get('analysis'):
+                raise ValueError('请先分析素材')
+            regions = []
+            for region in body['protected']:
+                start, end = timeline.number(region['start']), timeline.number(region['end'])
+                if not 0 <= start < end <= asset['analysis']['duration']:
+                    raise ValueError('音乐保护区时间越界')
+                regions.append({'start': start, 'end': end})
+            asset['protected'] = regions
+        result = store.put('asset', rules(asset))
+        for project_id in {old_owner, owner} - {None}:
+            project = store.get('project', project_id)
+            project['stale_stages'] = sorted(set(project.get('stale_stages', [])) | {'edit'})
+            scene_id = project.get('workspace', {}).get('scene_version')
+            if old_owner != owner and scene_id and any(s.get('asset_id') == ident for s in store.get('version', scene_id)['result']['scenes']):
+                project['stale_stages'] = sorted(set(project['stale_stages']) | {'scenes'})
+            store.put('project', project)
+        return result

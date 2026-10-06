@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from app import claude_cli, cli_guard, config, media, projects, store
+from app import claude_cli, cli_guard, config, media, store
 from app.main import app
 
 FFMPEG, FFPROBE = media.executable('ffmpeg'), media.executable('ffprobe')
@@ -93,197 +93,8 @@ class CliPolicyTests(unittest.TestCase):
         self.assertEqual(env['CLAUDE_CONFIG_DIR'], '/own/cli/config')
 
 
-
-
-class Workbench(unittest.TestCase):
-    """An isolated data folder, the fake CLI and a test client."""
-    mode = 'success'
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='cli workbench ')
-        self.data = patch.object(store, 'DATA', Path(self.temp.name))
-        self.data.start()
-        self.command = patch.object(claude_cli, 'cli_command', return_value=[sys.executable, str(FAKE)])
-        self.command.start()
-        self.env = patch.dict(os.environ, {'CLI_TEST_MODE': self.mode, 'CLI_TEST_FILES': '{}',
-                                           'ANTHROPIC_API_KEY': 'sk-ant-test-never-forward-this-key'})
-        self.env.start()
-        if FFMPEG and FFPROBE:
-            config.save_tools({'ffmpeg_path': FFMPEG, 'ffprobe_path': FFPROBE})
-        self.context = TestClient(app)
-        self.client = self.context.__enter__()
-        self.project = self.client.post('/api/projects', json={'name': 'CLI 视频'}).json()['project']
-        self.url = '/api/projects/' + self.project['id']
-
-    def tearDown(self):
-        self.context.__exit__(None, None, None)
-        self.env.stop()
-        self.command.stop()
-        self.data.stop()
-        self.temp.cleanup()
-
-    def wait_task(self, ident, seconds=20):
-        for _ in range(int(seconds / .05)):
-            task = store.get('task', ident)
-            if task['status'] not in ('queued', 'running', 'cancelling'):
-                return task
-            time.sleep(.05)
-        self.fail('CLI task did not finish')
-
-    def run_prompt(self, prompt='制作测试视频', **body):
-        response = self.client.post(self.url + '/run', json={'prompt': prompt, **body})
-        self.assertEqual(response.status_code, 200, response.text)
-        return self.wait_task(response.json()['id'])
-
-    def work(self, project_id=None):
-        return store.project_file(project_id or self.project['id'], claude_cli.WORKDIR)
-
-    def received(self, project_id=None):
-        return json.loads((self.work(project_id) / '.claude' / 'received.json').read_text(encoding='utf-8'))
-
-
-class TextRunTests(Workbench):
-    mode = 'text'
-
-    def test_prompt_is_sent_verbatim_with_no_added_rules(self):
-        prompt = '调研一下，保留引号 " 和 shell 文本 $(whoami) & literal'
-        task = self.run_prompt(prompt)
-        self.assertEqual(task['status'], 'completed', task.get('error'))
-        received = self.received()
-        self.assertEqual(received['prompt'], prompt)
-        self.assertNotIn(prompt, received['argv'])
-        self.assertFalse(received['has_api_key'])
-        for flag in ('--bare', '--dangerously-skip-permissions', '--restricted', '--append-system-prompt',
-                     '--system-prompt', '--json-schema'):
-            self.assertNotIn(flag, received['argv'])
-        self.assertEqual(received['argv'][received['argv'].index('--tools') + 1], 'default')
-        # Nothing is placed in the working folder for Claude to pick up besides the materials.
-        self.assertFalse((self.work() / '.claude' / 'skills').exists())
-        self.assertNotIn('PRIVATE_REASONING', json.dumps(task))
-        out = task['output']
-        self.assertEqual(out['reply'], 'fixture video complete')
-        self.assertEqual(out['web'], ['https://example.org/read-page'])
-        self.assertIsNone(out['version_id'])
-        self.assertEqual(store.listing('version', self.project['id']), [])
-
-    def test_followups_continue_the_conversation_unless_fresh(self):
-        first = self.run_prompt('第一步')
-        second = self.run_prompt('第二步')
-        args = self.received()['argv']
-        self.assertEqual(args[args.index('--resume') + 1], first['cli_session_id'])
-        self.assertIn('--fork-session', args)
-        self.assertNotEqual(second['cli_session_id'], first['cli_session_id'])
-        self.run_prompt('重新开始', fresh=True)
-        self.assertNotIn('--resume', self.received()['argv'])
-
-    def test_tab_files_are_read_and_text_files_can_be_edited(self):
-        directions = {'directions': [{'title': '方向一', 'hook': '开场'}, {'title': '方向二'}, {'reason': '没有标题会被忽略'}]}
-        research = {'title': '夜跑', 'summary': 7, 'what_happened': ['不是字符串'],
-                    'facts': [{'claim': '事实一', 'sources': ['https://example.org/a', 'ftp://bad']}, {'sources': []}, '坏数据'],
-                    'viewpoints': ['观点', 3, None], 'sources': [{'url': 'https://example.org/a', 'title': '甲'}, {'url': 'javascript:x'}]}
-        files = {'调研.md': '# 调研\n事实', 'directions.json': json.dumps(directions, ensure_ascii=False),
-                 'research.json': json.dumps(research, ensure_ascii=False), '脚本.md': '# 脚本\n第一句',
-                 'site/index.html': '<script>fetch("/api/projects")</script>', 'node_modules/x/index.js': 'skip'}
-        with patch.dict(os.environ, {'CLI_TEST_FILES': json.dumps(files, ensure_ascii=False)}):
-            task = self.run_prompt('调研并给方向')
-        self.assertEqual(task['status'], 'completed', task.get('error'))
-        written = ['directions.json', 'research.json', 'site/index.html', '脚本.md', '调研.md']
-        self.assertEqual(sorted(task['output']['files']), written)
-        detail = self.client.get(self.url).json()
-        self.assertEqual([d['title'] for d in detail['directions']], ['方向一', '方向二'])
-        # Malformed parts of research.json are dropped instead of breaking the 调研 tab.
-        r = detail['research']
-        self.assertEqual((r['title'], r['summary'], r['what_happened']), ('夜跑', '7', ''))
-        self.assertEqual(r['facts'], [{'claim': '事实一', 'sources': ['https://example.org/a']}])
-        self.assertEqual(r['viewpoints'], ['观点', '3'])
-        self.assertEqual(r['sources'], [{'url': 'https://example.org/a', 'title': '甲'}])
-        self.assertEqual(detail['script'], '# 脚本\n第一句')
-        self.assertEqual(sorted(f['path'] for f in detail['files']), written)
-        self.assertNotIn('asset_snapshot', detail['tasks'][0])
-        response = self.client.get(self.url + '/work/' + '调研.md')
-        self.assertEqual(response.text, '# 调研\n事实')
-        self.assertTrue(response.headers['content-type'].startswith('text/plain'))
-        page = self.client.get(self.url + '/work/site/index.html')
-        # Pages Claude wrote run in an isolated origin and cannot call the workbench API.
-        self.assertEqual(page.headers['content-security-policy'], 'sandbox allow-scripts')
-        self.assertEqual(self.client.put(self.url + '/work/' + '调研.md', json={'text': '# 改过'}).status_code, 200)
-        self.assertEqual((self.work() / '调研.md').read_text(encoding='utf-8'), '# 改过')
-        for path in ('site/index.html', '..%2Foutside.md', '素材/a.md', '.claude/settings.json'):
-            with self.subTest(path=path):
-                self.assertEqual(self.client.put(self.url + '/work/' + path, json={'text': 'x'}).status_code, 400)
-        self.assertFalse((self.work().parent / 'outside.md').exists())
-
-    def test_a_reply_without_files_is_a_normal_answer(self):
-        with patch.dict(os.environ, {'CLI_TEST_REPLY': '你想给谁看？A. 学生 B. 上班族'}):
-            task = self.run_prompt('先问我几个问题')
-        self.assertEqual(task['status'], 'completed', task.get('error'))
-        self.assertEqual(task['output']['reply'], '你想给谁看？A. 学生 B. 上班族')
-        self.assertEqual(task['output']['files'], [])
-
-    def test_failures_without_output_fail_and_retry_freezes_configuration(self):
-        for mode, message in [('no_result', '没有完成'), ('failed', 'test turn limit')]:
-            with self.subTest(mode=mode), patch.dict(os.environ, {'CLI_TEST_MODE': mode}):
-                task = self.run_prompt()
-                self.assertEqual(task['status'], 'failed')
-                self.assertIn(message, task['error'])
-        self.assertEqual(task['cli_result']['reported_cost_usd'], .02)
-        self.client.put('/api/claude-code', json={'model': 'sonnet'})
-        response = self.client.post('/api/tasks/' + task['id'] + '/retry', json={})
-        result = self.wait_task(response.json()['id'])
-        self.assertEqual(result['status'], 'completed', result.get('error'))
-        self.assertEqual(result['cli_config']['model'], 'opus')
-        self.assertEqual(result['payload']['prompt'], '制作测试视频')
-        args = self.received()['argv']
-        self.assertEqual(args[args.index('--resume') + 1], task['cli_session_id'])
-
-    def test_one_run_at_a_time_and_cancellation_stops_a_silent_process(self):
-        with patch.dict(os.environ, {'CLI_TEST_MODE': 'hang'}):
-            ident = self.client.post(self.url + '/run', json={'prompt': '等待测试'}).json()['id']
-            for _ in range(100):
-                task = store.get('task', ident)
-                if task.get('cli_session_id') and (self.work() / '.claude' / 'child.pid').exists():
-                    break
-                time.sleep(.05)
-            self.assertTrue(task.get('cli_session_id'))
-            self.assertEqual(self.client.post(self.url + '/run', json={'prompt': '再来'}).status_code, 400)
-            self.client.post('/api/tasks/' + ident + '/cancel', json={})
-            result = self.wait_task(ident)
-        self.assertEqual(result['status'], 'cancelled')
-        self.assertTrue(result['cli_session_id'])
-
-    def test_timeout_stops_the_process_tree(self):
-        settings = claude_cli.options() | {'timeout_sec': 1}
-        with patch.object(claude_cli, 'options', return_value=settings), patch.dict(os.environ, {'CLI_TEST_MODE': 'timeout'}):
-            task = self.run_prompt()
-        self.assertEqual(task['status'], 'failed')
-        self.assertIn('超时', task['error'])
-
-    def test_creating_with_a_prompt_runs_it_and_missing_cli_keeps_the_idea(self):
-        response = self.client.post('/api/projects', json={'prompt': '做一条关于城市夜跑的视频\n要轻松'})
-        self.assertEqual(response.status_code, 200, response.text)
-        body = response.json()
-        self.assertEqual(body['project']['name'], '做一条关于城市夜跑的视频')
-        task = self.wait_task(body['task']['id'])
-        self.assertEqual(self.received(body['project']['id'])['prompt'], '做一条关于城市夜跑的视频\n要轻松')
-        self.assertEqual(task['status'], 'completed', task.get('error'))
-        with patch.object(claude_cli, 'cli_command', return_value=None):
-            body = self.client.post('/api/projects', json={'prompt': '没有 CLI 的想法'}).json()
-            self.assertTrue(body['needs_cli'])
-            self.assertIsNone(body['task'])
-            self.assertEqual(store.get('project', body['project']['id'])['idea'], '没有 CLI 的想法')
-            self.assertEqual(self.client.post(self.url + '/run', json={'prompt': '制作'}).status_code, 400)
-        self.assertEqual(self.client.post(self.url + '/run', json={'prompt': '   '}).status_code, 400)
-
-    def test_read_only_cli_check_does_not_persist_account_details(self):
-        response = self.client.post('/api/claude-code/check', json={})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertTrue(response.json()['last_check']['logged_in'])
-        self.assertNotIn('email', json.dumps(config.read()))
-        self.assertNotIn('never-persist', response.text)
-
-
 @unittest.skipUnless(FFMPEG and FFPROBE, '需要本机 FFmpeg / ffprobe')
-class VideoRunTests(Workbench):
+class CliVideoTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.fixtures = tempfile.TemporaryDirectory(prefix='cli fixtures ')
@@ -303,26 +114,67 @@ class VideoRunTests(Workbench):
         cls.fixtures.cleanup()
 
     def setUp(self):
-        super().setUp()
-        self.videos = patch.dict(os.environ, {'CLI_TEST_VIDEO': str(self.video), 'CLI_TEST_ALT_VIDEO': str(self.alt_video)})
-        self.videos.start()
+        self.temp = tempfile.TemporaryDirectory(prefix='cli workbench ')
+        self.data = patch.object(store, 'DATA', Path(self.temp.name))
+        self.data.start()
+        self.command = patch.object(claude_cli, 'cli_command', return_value=[sys.executable, str(FAKE)])
+        self.command.start()
+        self.env = patch.dict(os.environ, {'CLI_TEST_VIDEO': str(self.video), 'CLI_TEST_ALT_VIDEO': str(self.alt_video),
+                              'CLI_TEST_MODE': 'success', 'ANTHROPIC_API_KEY': 'sk-ant-test-never-forward-this-key'})
+        self.env.start()
+        config.save({'ffmpeg_path': FFMPEG, 'ffprobe_path': FFPROBE})
+        self.context = TestClient(app)
+        self.client = self.context.__enter__()
+        self.project = self.client.post('/api/projects', json={'name': 'CLI 视频'}).json()
+        self.url = '/api/projects/' + self.project['id']
 
     def tearDown(self):
-        self.videos.stop()
-        super().tearDown()
+        self.context.__exit__(None, None, None)
+        self.env.stop()
+        self.command.stop()
+        self.data.stop()
+        self.temp.cleanup()
+
+    def wait_task(self, ident, seconds=15):
+        for _ in range(int(seconds / .05)):
+            task = store.get('task', ident)
+            if task['status'] not in ('queued', 'running', 'cancelling'):
+                return task
+            time.sleep(.05)
+        self.fail('CLI task did not finish')
+
+    def submit(self, **body):
+        response = self.client.post(self.url + '/tasks', json={'kind': 'cli_video', 'prompt': '制作测试视频', **body})
+        self.assertEqual(response.status_code, 200, response.text)
+        return self.wait_task(response.json()['id'])
+
+    def work(self, project_id=None):
+        return store.project_file(project_id or self.project['id'], claude_cli.WORKDIR)
+
+    def received(self, project_id=None):
+        return json.loads((self.work(project_id) / 'received.json').read_text(encoding='utf-8'))
 
     def upload(self, name, kind=None):
         # Trailing bytes give each upload its own content fingerprint; players ignore them.
         content = self.video.read_bytes() + name.encode() + str(time.time()).encode()
-        response = self.client.post(self.url + '/assets' + (f'?type={kind}' if kind else ''),
+        response = self.client.post(self.url + '/assets' + (f'?kind={kind}' if kind else ''),
                                     files={'file': (name, content, 'video/mp4')})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
-    def test_newest_video_becomes_a_playable_version(self):
-        task = self.run_prompt()
+    def test_only_the_prompt_reaches_claude_and_followup_resumes(self):
+        prompt = '制作视频，保留引号 " 和 shell 文本 $(whoami) & literal'
+        task = self.submit(prompt=prompt)
         self.assertEqual(task['status'], 'completed', task.get('error'))
-        self.assertEqual(task['output']['files'][:2], ['final.mp4', 'drafts/draft.mp4'])
+        received = self.received()
+        self.assertEqual(received['prompt'], prompt)
+        self.assertNotIn(prompt, received['argv'])
+        self.assertFalse(received['has_api_key'])
+        for flag in ('--bare', '--dangerously-skip-permissions', '--restricted', '--append-system-prompt', '--system-prompt'):
+            self.assertNotIn(flag, received['argv'])
+        self.assertEqual(received['argv'][received['argv'].index('--tools') + 1], 'default')
+        self.assertNotIn('PRIVATE_REASONING', json.dumps(task))
+        self.assertEqual(sorted(p.name for p in self.work().iterdir()), ['drafts', 'final.mp4', 'received.json'])
         version = store.get('version', task['output']['version_id'])
         self.assertEqual(version['result']['engine'], 'claude_cli')
         self.assertEqual(version['result']['summary'], 'fixture video complete')
@@ -331,6 +183,7 @@ class VideoRunTests(Workbench):
         self.assertEqual(version['preview']['video'], f'videos/{task["id"]}/video.mp4')
         self.assertTrue(version['preview']['checks']['decodable'])
         self.assertEqual(store.get('project', self.project['id'])['adopted']['edit'], version['id'])
+        self.assertEqual(store.listing('usage'), [])
         settings = store.project_file(self.project['id'], 'agent-control/' + task['id'] + '/settings.json')
         hook = json.loads(settings.read_text(encoding='utf-8'))['hooks']['PreToolUse'][0]['hooks'][0]
         # Exercise the generated hook using real argv, including paths with spaces.
@@ -344,42 +197,46 @@ class VideoRunTests(Workbench):
         video_response = self.client.get(self.url + '/files/' + version['preview']['video'])
         self.assertEqual(video_response.status_code, 200)
         self.assertEqual(video_response.headers['content-type'], 'video/mp4')
-        films = self.client.get('/api/library').json()['films']
-        self.assertEqual([f['id'] for f in films], [version['id']])
-        publication = self.client.post(self.url + '/publications', json={'platform': 'B站', 'url': 'https://example.org/v'})
-        self.assertEqual(publication.status_code, 200, publication.text)
+        second = self.submit(prompt='把开头调整一下', base_version_id=version['id'])
+        self.assertEqual(second['status'], 'completed', second.get('error'))
+        received = self.received()
+        self.assertEqual(received['prompt'], '把开头调整一下')
+        args = received['argv']
+        self.assertEqual(args[args.index('--resume')+1], version['cli_session_id'])
+        self.assertIn('--fork-session', args)
+        self.assertNotEqual(second['cli_session_id'], task['cli_session_id'])
+        self.assertTrue(store.project_file(self.project['id'], version['preview']['video']).is_file())
 
     def test_materials_are_copied_by_name_and_kept_in_sync(self):
         self.upload('main.mp4')
         self.upload('main.mp4')
-        self.upload('配乐.mp4', 'Music')
+        self.upload('配乐.mp4', 'music')
         folder = self.work() / claude_cli.MATERIALS
         folder.mkdir(parents=True)
         (folder / 'removed.mp4').write_bytes(b'from an asset that no longer exists')
-        task = self.run_prompt()
+        task = self.submit()
         self.assertEqual(task['status'], 'completed', task.get('error'))
         self.assertEqual(self.received()['materials'], ['main (2).mp4', 'main.mp4', '配乐.mp4'])
-        self.assertNotIn('素材/main.mp4', task['output']['files'])
+        self.assertEqual(self.received()['prompt'], '制作测试视频')
+
+    def test_run_without_a_new_video_fails_with_claudes_reply(self):
+        for mode, message in [('missing', '我需要更多信息'), ('no_result', '未完成'), ('failed', 'test turn limit'), ('corrupt', '本地处理失败')]:
+            with self.subTest(mode=mode), patch.dict(os.environ, {'CLI_TEST_MODE': mode}):
+                task = self.submit()
+                self.assertEqual(task['status'], 'failed')
+                self.assertIn(message, task['error'])
+        self.assertEqual(store.listing('version', self.project['id']), [])
 
     def test_video_left_by_an_unfinished_run_is_kept_with_a_note(self):
         with patch.dict(os.environ, {'CLI_TEST_MODE': 'failed_with_video'}):
-            task = self.run_prompt()
+            task = self.submit()
         self.assertEqual(task['status'], 'completed', task.get('error'))
-        self.assertIn('没有正常结束', task['output']['warnings'][0])
         version = store.get('version', task['output']['version_id'])
         self.assertIn('没有正常结束', version['result']['notes'][0])
 
-    def test_unreadable_video_is_reported_without_losing_the_reply(self):
-        with patch.dict(os.environ, {'CLI_TEST_MODE': 'corrupt'}):
-            task = self.run_prompt()
-        self.assertEqual(task['status'], 'completed', task.get('error'))
-        self.assertIsNone(task['output']['version_id'])
-        self.assertIn('无法保存为版本', task['output']['warnings'][0])
-        self.assertEqual(task['output']['reply'], 'fixture video complete')
-
     def test_unplayable_video_is_converted_for_the_browser(self):
         with patch.dict(os.environ, {'CLI_TEST_MODE': 'convert'}):
-            task = self.run_prompt()
+            task = self.submit()
         self.assertEqual(task['status'], 'completed', task.get('error'))
         version = store.get('version', task['output']['version_id'])
         self.assertTrue(any('已转换' in note for note in version['result']['notes']))
@@ -388,47 +245,80 @@ class VideoRunTests(Workbench):
         self.assertEqual(codecs, {'video': 'h264', 'audio': 'aac'})
         self.assertTrue((self.work() / 'final.mkv').is_file())
 
+    def test_sessions_from_the_old_working_folder_are_not_resumed(self):
+        legacy = store.put('version', {'stage': 'edit', 'result': {}, 'cli_session_id': '6f0b2a5e-5c4f-4d6e-9b1a-2b3c4d5e6f70'},
+                           self.project['id'])
+        task = self.submit(base_version_id=legacy['id'])
+        self.assertEqual(task['status'], 'completed', task.get('error'))
+        self.assertNotIn('--resume', self.received()['argv'])
 
-class LegacyProjectTests(unittest.TestCase):
-    def legacy_project(self, **extra):
-        p = store.put('project', {'name': '旧作品', 'adopted': {}, 'selected_topic_id': 't2', **extra, 'workspace': {
-            'idea': '旧想法', 'card': {'audience': '学生', 'tone': ''},
-            'extra_angles': {'t1': [{'id': 'more-1', 'title': '追加方向'}]}}})
-        store.put('version', {'stage': 'research', 'result': {'summary': '总结', 'topics': [
-            {'id': 't1', 'title': '没选的选题', 'angles': [{'id': 'angle-1', 'title': '方向甲', 'hook': '开场'}]},
-            {'id': 't2', 'title': '选中的选题', 'narratives': ['观点'],
-             'key_facts': [{'claim': '事实', 'source_urls': ['https://example.org']}]}],
-            'sources': [{'url': 'https://example.org', 'title': '来源'}]}}, p['id'])
-        store.put('version', {'stage': 'script', 'result': {'angle': '方向甲', 'paragraphs': [
-            {'id': 'a', 'speaker': 'A', 'text': '第一句', 'cue': '特写'}]}}, p['id'])
-        return p
+    def test_cancellation_interrupts_silent_process_and_preserves_session(self):
+        with patch.dict(os.environ, {'CLI_TEST_MODE': 'hang'}):
+            response = self.client.post(self.url + '/tasks', json={'kind':'cli_video','prompt':'等待测试'})
+            ident = response.json()['id']
+            for _ in range(100):
+                task = store.get('task', ident)
+                if task.get('cli_session_id') and (self.work() / 'child.pid').exists():
+                    break
+                time.sleep(.05)
+            self.assertTrue(task.get('cli_session_id'))
+            self.client.post('/api/tasks/' + ident + '/cancel', json={})
+            result = self.wait_task(ident)
+        self.assertEqual(result['status'], 'cancelled')
+        self.assertEqual(store.listing('version', self.project['id']), [])
+        self.assertTrue(result['cli_session_id'])
 
-    def test_old_research_scripts_and_card_become_the_tab_files(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(store, 'DATA', Path(folder)):
-            store.init()
-            fresh, earlier = self.legacy_project(), self.legacy_project(v3=True)  # v3: migrated once already
-            before = store.get('project', fresh['id'])['updated_at']
-            projects.migrate()
-            for p in (fresh, earlier):
-                work = store.project_file(p['id'], claude_cli.WORKDIR)
-                research = projects.research(p['id'])
-                self.assertEqual(research['title'], '选中的选题')
-                self.assertEqual(research['facts'], [{'claim': '事实', 'sources': ['https://example.org']}])
-                self.assertEqual(research['viewpoints'], ['观点'])
-                self.assertIn('第一句', projects.script(p['id']))
-                self.assertIn('学生', (work / '需求.md').read_text(encoding='utf-8'))
-                self.assertEqual([d['title'] for d in projects.directions(p['id'])], ['方向甲', '追加方向'])
-                self.assertEqual(store.get('project', p['id'])['migration'], projects.MIGRATION)
-            migrated = store.get('project', fresh['id'])
-            self.assertEqual(migrated['idea'], '旧想法')
-            self.assertEqual(migrated['updated_at'], before)
-            # Files Claude or the creator changed afterwards are never overwritten.
-            (work / '脚本.md').write_text('我改过', encoding='utf-8')
-            p = store.get('project', earlier['id'])
-            p['migration'] = 1
-            store.put('project', p)
-            projects.migrate()
-            self.assertEqual(projects.script(earlier['id']), '我改过')
+    def test_failure_usage_is_preserved_and_retry_freezes_configuration(self):
+        with patch.dict(os.environ, {'CLI_TEST_MODE': 'failed'}):
+            task = self.submit()
+        self.assertEqual(task['status'], 'failed')
+        self.assertEqual(task['cli_result']['reported_cost_usd'], .02)
+        self.client.put('/api/claude-code', json={'model':'sonnet'})
+        response = self.client.post('/api/tasks/' + task['id'] + '/retry', json={})
+        result = self.wait_task(response.json()['id'])
+        self.assertEqual(result['status'], 'completed', result.get('error'))
+        self.assertEqual(result['cli_config']['model'], 'opus')
+        args = self.received()['argv']
+        self.assertEqual(args[args.index('--resume')+1], task['cli_session_id'])
+
+    def test_read_only_cli_check_does_not_persist_account_details(self):
+        response = self.client.post('/api/claude-code/check', json={})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['last_check']['logged_in'])
+        self.assertNotIn('email', json.dumps(config.read()))
+        self.assertNotIn('never-persist', response.text)
+        self.assertEqual(store.listing('usage'), [])
+
+    def test_timeout_stops_process_tree_and_does_not_publish_partial_video(self):
+        settings = claude_cli.options() | {'timeout_sec': 1}
+        with patch.object(claude_cli, 'options', return_value=settings), patch.dict(os.environ, {'CLI_TEST_MODE':'timeout'}):
+            task = self.submit()
+        self.assertEqual(task['status'], 'failed')
+        self.assertIn('超时', task['error'])
+        self.assertEqual(store.listing('version', self.project['id']), [])
+
+    def test_cross_project_resume_and_missing_cli_rejected_before_start(self):
+        other = self.client.post('/api/projects', json={'name':'另一个项目'}).json()
+        version = store.put('version', {'stage':'edit','result':{}}, other['id'])
+        response = self.client.post(self.url + '/tasks', json={'kind':'cli_video','prompt':'制作','base_version_id':version['id']})
+        self.assertEqual(response.status_code, 400)
+        with patch.object(claude_cli, 'cli_command', return_value=None):
+            response = self.client.post(self.url + '/tasks', json={'kind':'cli_video','prompt':'制作'})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(store.listing('task', self.project['id']), [])
+
+    def test_direct_creation_sends_the_idea_verbatim_and_can_export_existing_video(self):
+        response = self.client.post('/api/creations', json={'idea':'直接制作一个视频', 'intent':'video'})
+        self.assertEqual(response.status_code, 200)
+        task = self.wait_task(response.json()['task']['id'])
+        self.assertEqual(task['kind'], 'cli_video')
+        self.assertEqual(task['status'], 'completed', task.get('error'))
+        project_id, version_id = response.json()['project']['id'], task['output']['version_id']
+        self.assertEqual(self.received(project_id)['prompt'], '直接制作一个视频')
+        response = self.client.post('/api/projects/' + project_id + '/tasks', json={'kind':'final','version_id':version_id})
+        final = self.wait_task(response.json()['id'])
+        self.assertEqual(final['status'], 'completed', final.get('error'))
+        self.assertEqual(len(store.listing('version', project_id)), 1)
 
 
 if __name__ == '__main__':
