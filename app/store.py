@@ -94,12 +94,24 @@ def task_credentials(ident):
     return json.loads(row['body']) if row else None
 
 
+def complete(kind, item):
+    """Projects saved by the prompt-only workbench lack the structured fields; read them with defaults."""
+    if kind == 'project':
+        idea = item.get('idea') or item.get('name', '')
+        for key, value in (('requirements', {}), ('defaults', None), ('status', '构思中'), ('adopted', {}),
+                           ('stale_stages', []), ('stage_settings', {}), ('stage_prompts', {}),
+                           ('workspace', {'idea': idea, 'intent': 'research'})):
+            if key not in item:
+                item[key] = settings() if key == 'defaults' else value
+    return item
+
+
 def get(kind, ident):
     with connection() as db:
         row = db.execute('SELECT body FROM objects WHERE id=? AND kind=?', (ident, kind)).fetchone()
     if not row:
         raise ValueError('记录不存在')
-    return json.loads(row['body'])
+    return complete(kind, json.loads(row['body']))
 
 
 def listing(kind, project_id=None):
@@ -109,7 +121,7 @@ def listing(kind, project_id=None):
             sql += ' AND project_id=?'
             args.append(project_id)
         rows = db.execute(sql + ' ORDER BY created_at DESC', args).fetchall()
-    return [json.loads(row['body']) for row in rows]
+    return [complete(kind, json.loads(row['body'])) for row in rows]
 
 
 DEFAULTS = {'audience': '对当前话题感兴趣的观众', 'roles': '', 'style': '自然、轻松，少用术语',

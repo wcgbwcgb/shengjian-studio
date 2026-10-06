@@ -69,6 +69,16 @@ class WorkspaceTests(unittest.TestCase):
             time.sleep(.03)
         self.fail('Worker did not complete')
 
+    def test_project_from_the_prompt_only_workbench_opens_with_defaults(self):
+        # That version saved only name and idea; the workspace must still open it.
+        p = store.put('project', {'name': '街访', 'idea': '街访：单曲循环最久的歌'})
+        detail = self.client.get('/api/projects/' + p['id'])
+        self.assertEqual(detail.status_code, 200)
+        project = detail.json()['project']
+        self.assertEqual(project['requirements'], {})
+        self.assertEqual(project['defaults']['aspect'], '9:16')
+        self.assertEqual(project['workspace']['idea'], '街访：单曲循环最久的歌')
+
     def test_create_preserves_url_and_does_not_fake_research_without_provider(self):
         r = self.client.post('/api/creations', json={'idea': '研究 https://example.org/test'}).json()
         d = self.client.get('/api/projects/' + r['project']['id']).json()
