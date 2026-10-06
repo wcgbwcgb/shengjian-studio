@@ -169,6 +169,9 @@ def call(task, mode, context, cancel, phase):
     if (mode == 'research' and context.get('intent') != 'advice') or (mode == 'inspire' and context.get('web')):
         payload['tools'] = [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': int(context['effective']['search_limit']), 'allowed_callers': ['direct']},
                             {'type': 'web_fetch_20250910', 'name': 'web_fetch', 'max_uses': 10, 'allowed_callers': ['direct']}]
+    from . import claude_cli
+    claude_cli.record_sent(task, '【system】\n' + payload['system'] + '\n\n【user】\n' + payload['messages'][0]['content'],
+                           engine='api')
     phase('正在检索与读取资料' if payload.get('tools') else '正在思考' if mode == 'chat' else '正在生成')
     started = time.monotonic()
     raw, total_searches = [], 0

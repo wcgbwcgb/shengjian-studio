@@ -47,7 +47,7 @@ function renderWorkspace() {
   const p=wproject(), script=wversion('script'), scenes=wversion('scenes'), cut=wversion('edit');
   const direct=['video','assets'].includes(p.workspace?.intent),tabs=direct?{video:'素材与视频'}:workspaceTabs;
   const done={research:!!p.adopted.research,script:!!script,video:!!cut?.preview};
-  return `<div class="studio-shell"><div class="studio-heading"><div><h1 title="${esc(p.name_custom?p.name:p.selected_topic?.title||p.name)}">${esc(p.name_custom?p.name:p.selected_topic?.title||p.name)}</h1><div class="studio-meta"><span>${esc(p.requirements?.aspect||p.defaults.aspect)}</span><span>约 ${esc(p.requirements?.duration||p.defaults.duration)} 秒</span><span id="draft-status">${readDraft()?'编辑已暂存':'所有进展自动保存'}</span></div></div><div class="button-row">${vbutton('rename-project','重命名','ghost small',`data-id="${p.id}"`)}${vbutton('history','◷ 版本记录','ghost small')}</div></div>
+  return `<div class="studio-shell"><div class="studio-heading"><div><h1 title="${esc(p.name_custom?p.name:p.selected_topic?.title||p.name)}">${esc(p.name_custom?p.name:p.selected_topic?.title||p.name)}</h1><div class="studio-meta"><span>${esc(p.requirements?.aspect||p.defaults.aspect)}</span><span>约 ${esc(p.requirements?.duration||p.defaults.duration)} 秒</span><span id="draft-status">${readDraft()?'编辑已暂存':'所有进展自动保存'}</span></div></div><div class="button-row">${vbutton('rename-project','重命名','ghost small',`data-id="${p.id}"`)}${vbutton('history','◷ 版本记录','ghost small')}${vbutton('sent-list','✉ 发送记录','ghost small',`title="每次发给 Claude 的原文"`)}</div></div>
     <div class="studio-nav" role="tablist" aria-label="创作阶段">${Object.entries(tabs).map(([tab,title],i)=>vbutton('tab',`<span class="tab-number">${done[tab]?'✓':String(i+1).padStart(2,'0')}</span>${title}`,W.tab===tab?'selected':'',`role="tab" aria-selected="${W.tab===tab}" data-tab="${tab}"`)).join('')}<span class="studio-nav-note">随时回到前面，继续打磨</span></div>
     <div class="studio-layout"><section class="studio-main" aria-label="${workspaceTabs[W.tab]}"><div id="creation-status" aria-live="polite">${workspaceStatus()}</div>${W.tab==='research'?workspaceTools('research')+workspaceResearch():W.tab==='script'?workspaceTools('script')+workspaceScript(script):workspaceVideo(scenes,cut)}</section><aside class="creative-context">${workspaceContext(p,script,scenes,cut)}</aside></div>${!direct&&['research','script'].includes(W.tab)&&!(W.tab==='research'&&!wversion('research')&&activeTask()?.kind!=='research')?chatDrawer():''}</div>`;
 }
@@ -67,6 +67,25 @@ const TASK_COPY = {
   final:{title:'正在导出高清成片',expect:'通常需要 1 分钟左右'},
   preview:{title:'正在渲染预览',expect:'通常需要几十秒'},
 };
+// What each run sent to Claude, exactly; an edited copy can be sent again as a new run.
+const SENT_KINDS = {research:'研究',angles:'构思方向',script:'写脚本',chat:'对话',cli_video:'制作视频',edit:'剪辑时间线'};
+const sentLink = t => vbutton('sent-view','查看发给 Claude 的原文','text-button small',`data-id="${t.id}"`);
+function sentListModal() {
+  const runs=S.detail.tasks.filter(t=>SENT_KINDS[t.kind]);
+  const state={completed:'已完成',failed:'未完成',interrupted:'被中断',cancelled:'已停止',queued:'排队中',running:'进行中',cancelling:'正在停止'};
+  modal('发送记录',`<p class="section-note">这个作品里每一次发给 Claude 的内容，最新的在最上面。打开后可以看到原文，也可以修改后重新发送。</p><div class="sent-list">${runs.map(t=>`<div class="sent-row"><div><strong>${SENT_KINDS[t.kind]}</strong>${t.prompt_override?'<span class="chip">修改原文后发送</span>':''}<small>${date(t.created_at)} · ${esc(state[t.status]||t.status)}${t.model_config?.model?' · '+esc(modelName(t.model_config.model)):''}</small></div>${vbutton('sent-view','查看原文','small',`data-id="${t.id}"`)}</div>`).join('')||'<p class="muted">还没有发给 Claude 的内容。</p>'}</div>`);
+}
+async function sentModal(id) {
+  const sent=await api(`/tasks/${id}/sent`), resume=sent.args.includes('--resume');
+  W.sentOriginal=sent.prompt;
+  const busy=!!activeTask(), meta=[SENT_KINDS[sent.kind]||sent.kind,sent.model&&modelName(sent.model),date(sent.at),sent.engine==='api'?'API 服务':resume?'接着之前的会话（Claude 记得之前的过程）':'新会话',sent.edited&&'修改原文后发送'].filter(Boolean);
+  const why=!sent.resendable?(sent.engine==='api'?'通过 API 服务运行的任务只能查看原文。':'这类任务只能查看原文。'):busy?'这个作品正在运行任务，结束后才能重新发送。':'';
+  modal('发给 Claude 的原文',`<div class="sent-meta">${meta.map(m=>`<span>${esc(m)}</span>`).join('')}</div>
+    <textarea id="sent-editor" class="sent-editor" spellcheck="false" ${sent.resendable?'':'readonly'}>${esc(sent.prompt)}</textarea>
+    <p class="small-note">${sent.engine==='api'?'这是发给 API 服务的 system 与 user 内容。':'这就是写进 Claude Code 的全部文字，一字不差。Claude Code 自己的系统提示词会照常加上。'}${sent.resendable?' 可以直接修改，点「用修改后的原文重新发送」会把框里的文字作为一次新的运行发出去，结果和平常一样出现在原来的位置（新的版本或新的回复）；不影响以后的任务。':''}${sent.args.includes('--json-schema')?' 返回格式由下面的 --json-schema 参数固定，改原文不会改变结果的结构。':''}</p>
+    ${sent.args.length?`<details class="details"><summary>命令行参数</summary><pre class="sent-args">${esc(sent.args.join(' '))}</pre></details>`:''}${why?`<p class="small-note">${why}</p>`:''}`,
+    vbutton('sent-copy','复制原文','ghost')+(sent.resendable?vbutton('sent-reset','恢复原文','ghost')+vbutton('sent-resend','用修改后的原文重新发送','primary',`data-id="${id}" data-kind="${sent.kind}" ${busy?'disabled':''}`):button('close-modal','关闭','primary')));
+}
 function workspaceStatus() {
   const task=activeTask(), last=S.detail.tasks[0];
   // Conversation turns show their progress inside the conversation itself.
@@ -74,13 +93,13 @@ function workspaceStatus() {
   if(task){
     const copy=TASK_COPY[task.kind]||{title:'正在处理',expect:''}, steps=[...new Set((task.logs||[]).map(l=>l.text))].slice(-5);
     const cancelling=task.status==='cancelling';
-    return `<div class="creative-status working"><span class="status-orbit">∿</span><div><strong>${cancelling?'正在停止…':esc(copy.title)}</strong><p>已用时 <span data-since="${esc(task.started_at||task.created_at)}">${elapsedText(task.started_at||task.created_at)}</span>${copy.expect?` · ${copy.expect}`:''} · 可以离开这个页面，完成后会自动显示。</p>${steps.length?`<ol class="task-steps">${steps.map((text,i)=>`<li class="${i===steps.length-1?'current':'done'}">${esc(text)}</li>`).join('')}</ol>`:'<ol class="task-steps"><li class="current">排队中，马上开始</li></ol>'}</div>${cancelling?'':button('cancel-task','停止','text-button small',`data-id="${task.id}" title="停止后已有内容会保留"`)}</div>`;
+    return `<div class="creative-status working"><span class="status-orbit">∿</span><div><strong>${cancelling?'正在停止…':esc(copy.title)}</strong><p>已用时 <span data-since="${esc(task.started_at||task.created_at)}">${elapsedText(task.started_at||task.created_at)}</span>${copy.expect?` · ${copy.expect}`:''} · 可以离开这个页面，完成后会自动显示。</p>${steps.length?`<ol class="task-steps">${steps.map((text,i)=>`<li class="${i===steps.length-1?'current':'done'}">${esc(text)}</li>`).join('')}</ol>`:'<ol class="task-steps"><li class="current">排队中，马上开始</li></ol>'}${SENT_KINDS[task.kind]?sentLink(task):''}</div>${cancelling?'':button('cancel-task','停止','text-button small',`data-id="${task.id}" title="停止后已有内容会保留"`)}</div>`;
   }
-  if(last&&last.status==='cancelled')return `<div class="creative-status interrupted"><span>↳</span><div><strong>已停止</strong><p>已有内容都还在。需要时可以重新开始。</p></div>${button('retry-task','重新开始','small',`data-id="${last.id}"`)}</div>`;
+  if(last&&last.status==='cancelled')return `<div class="creative-status interrupted"><span>↳</span><div><strong>已停止</strong><p>已有内容都还在。需要时可以重新开始。</p>${SENT_KINDS[last.kind]?sentLink(last):''}</div>${button('retry-task','重新开始','small',`data-id="${last.id}"`)}</div>`;
   if(last&&['failed','interrupted'].includes(last.status)){
     const e=last.status==='interrupted'?{title:'上次处理被中断了',why:'工作台在处理过程中关闭或重启了。',next:'已有内容都还在，点「继续」重新开始这一步。',action:'retry',detail:''}:explainError(last.error,last.kind);
     const actions=e.action==='settings'?vbutton('connect','打开设置','primary small')+button('retry-task','重试','small',`data-id="${last.id}"`):button('retry-task',last.status==='interrupted'?'继续':'重试','primary small',`data-id="${last.id}"`);
-    return `<div class="creative-status interrupted" role="alert"><span>!</span><div><strong>${esc(e.title)}</strong><p>${e.why?esc(e.why)+' ':''}${esc(e.next)}</p>${e.detail?`<details class="error-detail"><summary>技术细节</summary><code>${esc(e.detail)}</code></details>`:''}</div><div class="button-row">${actions}</div></div>`;
+    return `<div class="creative-status interrupted" role="alert"><span>!</span><div><strong>${esc(e.title)}</strong><p>${e.why?esc(e.why)+' ':''}${esc(e.next)}</p>${e.detail?`<details class="error-detail"><summary>技术细节</summary><code>${esc(e.detail)}</code></details>`:''}${SENT_KINDS[last.kind]?sentLink(last):''}</div><div class="button-row">${actions}</div></div>`;
   }
   if(!(S.env.creation_configured??S.env.api_configured)&&W.tab!=='video')return `<div class="creative-status"><span>∿</span><div><strong>想法已经收好</strong><p>在设置中连接 Claude 订阅或 API 服务，即可开始调研与写稿。</p></div>${vbutton('connect','连接服务 →','small')}</div>`;
   const message=S.detail.messages.find(m=>m.role==='assistant'&&!m.version_id);
@@ -320,6 +339,18 @@ function assetPicker(sceneId) {
 
 async function handleV2(action,el) {
   const a=action.slice(3);
+  if(a==='sent-list')return sentListModal();
+  if(a==='sent-view')return sentModal(el.dataset.id);
+  if(a==='sent-copy'){await navigator.clipboard.writeText($('#sent-editor').value);toast('已复制。');return;}
+  if(a==='sent-reset'){$('#sent-editor').value=W.sentOriginal;toast('已恢复为这次实际发送的原文。');return;}
+  if(a==='sent-resend'){
+    const prompt=$('#sent-editor').value;
+    if(!prompt.trim())throw new Error('原文不能为空。');
+    await api(`/tasks/${el.dataset.id}/resend`,{prompt});$('#modal').close();
+    const tab={research:'research',angles:'research',script:'script',cli_video:'video'}[el.dataset.kind];
+    if(tab&&tab!==W.tab&&wproject().workspace?.intent!=='video'){W.tab=tab;history.pushState(null,'',`#workspace/${S.selected}/${tab}`);}
+    await refresh();toast((prompt===W.sentOriginal?'已按原文重新发送':'已按修改后的原文重新发送')+(el.dataset.kind==='chat'?'。':'，完成后会保存为新版本。'));return;
+  }
   if(a==='browse-inspiration')return navigate('inspiration');
   if(a==='favorite') {if(el.dataset.favorite)await api(`/inspirations/favorites/${el.dataset.favorite}`,{},'DELETE');else await api('/inspirations/favorites',{id:el.dataset.id});S.inspirations=await api('/inspirations');render();return;}
   if(a==='inspiration-create'){const result=await api('/inspirations/create',{id:el.dataset.id,clarify:clarifyPreference()});return openWorkspace(result.project.id,'research');}

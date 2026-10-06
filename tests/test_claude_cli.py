@@ -162,6 +162,20 @@ class CliVideoTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def test_video_text_is_recorded_outside_the_work_folder_and_can_be_resent_edited(self):
+        task = self.submit(prompt='做一条 20 秒竖屏视频')
+        self.assertEqual(task['status'], 'completed', task.get('error'))
+        sent = self.client.get(f"/api/tasks/{task['id']}/sent").json()
+        self.assertEqual(sent['prompt'], '做一条 20 秒竖屏视频')
+        self.assertEqual(sent['args'], self.received()['argv'][self.received()['argv'].index('-p'):])
+        self.assertNotIn('sent', [p.name for p in self.work().iterdir()])
+        response = self.client.post(f"/api/tasks/{task['id']}/resend", json={'prompt': '做一条 15 秒横屏视频'})
+        self.assertEqual(response.status_code, 200, response.text)
+        again = self.wait_task(response.json()['id'])
+        self.assertEqual(again['status'], 'completed', again.get('error'))
+        self.assertEqual(self.received()['prompt'], '做一条 15 秒横屏视频')
+        self.assertNotEqual(again['output']['version_id'], task['output']['version_id'])
+
     def test_only_the_prompt_reaches_claude_and_followup_resumes(self):
         prompt = '制作视频，保留引号 " 和 shell 文本 $(whoami) & literal'
         task = self.submit(prompt=prompt)

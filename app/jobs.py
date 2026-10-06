@@ -28,7 +28,7 @@ def close():
         THREAD.join(timeout=6)
 
 
-def submit(project_id, kind, payload, frozen=None):
+def submit(project_id, kind, payload, frozen=None, prompt_override=None):
     with LOCK:
         project = store.get('project', project_id)
         if any(t['status'] in ('running', 'queued', 'cancelling') for t in store.listing('task', project_id)):
@@ -98,8 +98,14 @@ def submit(project_id, kind, payload, frozen=None):
                 task[field] = copy.deepcopy(frozen[field])
             task['retry_of'] = frozen['id']
             task = store.put('task', task, project_id)
+        if prompt_override is not None:
+            # Written before the run is queued, so the worker always sees it.
+            claude_cli.sent_path(task, 'override.txt').write_text(prompt_override, encoding='utf-8')
+            task.update(prompt_override=True, edited_from=frozen['id'] if frozen else None)
+            task = store.put('task', task, project_id)
         EVENTS[task['id']] = threading.Event()
-        if prompt:
+        # A re-sent run repeats an earlier request; it is not a new instruction for the project.
+        if prompt and prompt_override is None:
             store.put('message', {'stage': stage, 'role': 'user', 'text': prompt, 'task_id': task['id'], 'effective': effective}, project_id)
             project.setdefault('stage_settings', {})[stage] = {k: v for k, v in effective.items() if k != 'prompt'}
             project.setdefault('stage_prompts', {})[stage] = prompt

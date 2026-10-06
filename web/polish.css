@@ -88,3 +88,13 @@ button:disabled,button[disabled]{opacity:.5;cursor:not-allowed}
 .work-info p .row-state{margin:0}
 /* Keep the player and its actions in one view on laptop screens. */
 .cut-player video,#preview-player{max-height:min(62vh,640px);width:100%;background:#0f1d18}
+.sent-meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.sent-meta span{font-size:11px;background:#f1f4ec;color:#5f7552;border-radius:5px;padding:3px 8px}
+.sent-editor{width:100%;min-height:46vh;font-size:12px;line-height:1.8;background:#f9faf6;white-space:pre-wrap}
+.sent-editor[readonly]{background:#f4f5f1}
+.sent-args{white-space:pre-wrap;overflow-wrap:anywhere;max-height:30vh;overflow:auto;font-size:11px;background:#f7f8f4;border-radius:8px;padding:10px 12px}
+.sent-list{display:grid;gap:8px;max-height:60vh;overflow:auto}
+.sent-row{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.sent-row strong{font-size:13px;margin-right:8px}
+.sent-row small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.creative-status .text-button[data-action="v2-sent-view"]{padding:6px 0 0;font-size:11px}

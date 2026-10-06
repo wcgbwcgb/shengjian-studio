@@ -265,6 +265,26 @@ def toolbox_python(event, report):
     return python
 
 
+def sent_path(task, suffix='json'):
+    """The exact text a run sent to Claude, kept outside the agent's writable folders."""
+    owner = store.project_dir(task['project_id']) if task.get('project_id') else store.DATA / 'inspiration'
+    folder = owner / 'sent'
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"{task['id']}.{suffix}"
+
+
+def record_sent(task, prompt, args=(), engine='claude_cli'):
+    record = {'prompt': prompt, 'args': list(args), 'engine': engine, 'at': store.now()}
+    sent_path(task).write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
+
+
+def prompt_override(task):
+    """A run re-sent with edited text uses that text instead of building its prompt."""
+    if not task.get('prompt_override'):
+        return None
+    return sent_path(task, 'override.txt').read_text(encoding='utf-8')
+
+
 def task_update(task, **values):
     from . import jobs
     with jobs.LOCK:
@@ -339,6 +359,8 @@ def prepare(task, event, report):
 
 def execute_process(task, command, root, prompt, event, report, on_event=None):
     timeout = task['cli_config']['timeout_sec']
+    # Flags start at -p; what precedes it is only where the executable lives.
+    record_sent(task, prompt, command[command.index('-p'):] if '-p' in command else [])
     proc = popen(command, cwd=str(root), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                  env=environment())
     messages = queue.Queue(maxsize=200)
@@ -538,7 +560,7 @@ def execute(task, event, report):
     report('正在启动本机 Claude Code')
     started, failure, outcome = time.time(), None, None
     try:
-        outcome = execute_process(task, args, work, task['payload']['prompt'], event, report)
+        outcome = execute_process(task, args, work, prompt_override(task) or task['payload']['prompt'], event, report)
     except ValueError as exc:
         # A run that stops early may still have produced a video worth keeping.
         failure = exc

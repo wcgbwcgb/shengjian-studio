@@ -273,6 +273,41 @@ def retry(task_id: str):
         return jobs.submit(old['project_id'], old['kind'], old['payload'], frozen=old)
 
 
+RESENDABLE = ('research', 'script', 'angles', 'chat', 'cli_video')
+
+
+@app.get('/api/tasks/{task_id}/sent')
+def sent(task_id: str):
+    task = store.get('task', task_id)
+    path = claude_cli.sent_path(task)
+    if not path.is_file():
+        raise ValueError('这次运行没有原文记录：它运行在加上这个功能之前，或者还没有开始发送。')
+    record = json.loads(path.read_text(encoding='utf-8'))
+    return record | {'task_id': task_id, 'kind': task['kind'], 'status': task['status'],
+                     'model': task.get('model_config', {}).get('model'), 'edited': bool(task.get('prompt_override')),
+                     'resendable': task['kind'] in RESENDABLE and record['engine'] == 'claude_cli' and bool(task.get('project_id'))}
+
+
+class ResendInput(BaseModel):
+    prompt: str = Field(min_length=1, max_length=1_000_000)
+
+
+@app.post('/api/tasks/{task_id}/resend')
+def resend(task_id: str, body: ResendInput):
+    """Run the same task again with the creator's edited copy of the exact text sent to Claude."""
+    old = store.get('task', task_id)
+    if old['kind'] not in RESENDABLE or not old.get('project_id'):
+        raise ValueError('这类任务不能修改原文后重新发送')
+    if (old.get('model_config') or {}).get('engine') != 'claude_cli':
+        raise ValueError('只有通过本机 Claude Code 运行的任务可以修改原文后重新发送')
+    if old['status'] in ('queued', 'running', 'cancelling'):
+        raise ValueError('这次运行还没有结束，请等它完成或停止后再重新发送')
+    if not body.prompt.strip():
+        raise ValueError('原文不能为空')
+    with jobs.LOCK:
+        return jobs.submit(old['project_id'], old['kind'], old['payload'], frozen=old, prompt_override=body.prompt)
+
+
 def owned_version(project_id, version_id):
     value = store.get('version', version_id)
     if value['project_id'] != project_id:

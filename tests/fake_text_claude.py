@@ -22,7 +22,7 @@ if any(key in output_schema for key in ('oneOf', 'allOf', 'anyOf')):
     sys.exit(1)
 field = next(key for key in ('topics', 'paragraphs', 'angles', 'ideas', 'reply') if key in output_schema['properties'])
 mode = {'topics': 'research', 'paragraphs': 'script', 'angles': 'angles', 'ideas': 'inspire', 'reply': 'chat'}[field]
-Path('received.json').write_text(json.dumps({'argv': sys.argv, 'has_api_key': bool(os.getenv('ANTHROPIC_API_KEY')),
+Path('received.json').write_text(json.dumps({'argv': sys.argv, 'prompt': prompt, 'has_api_key': bool(os.getenv('ANTHROPIC_API_KEY')),
                                           'context': context}, ensure_ascii=False), encoding='utf-8')
 session = str(uuid.uuid4())
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': session}), flush=True)

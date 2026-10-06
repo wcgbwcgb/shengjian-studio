@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from app import claude_cli, config, jobs, store, text_cli
+from app import claude_cli, config, jobs, models, store, text_cli
 from app.main import app
 
 FAKE = Path(__file__).with_name('fake_text_claude.py')
@@ -62,6 +62,43 @@ class SubscriptionTextTests(unittest.TestCase):
         self.assertIn('WebSearch,WebFetch', received['argv'])
         self.assertNotIn('Read,Write,Edit,Glob,Grep,Bash', received['argv'])
         self.assertTrue(task['cli_result']['reported_cost_usd'])
+
+    def received(self, task):
+        path = store.project_dir(self.project['id']) / 'text-tasks' / task['id'] / 'received.json'
+        return json.loads(path.read_text(encoding='utf-8'))
+
+    def test_exact_text_is_recorded_and_an_edited_copy_can_be_resent(self):
+        task = self.wait(self.submit('research', workspace=True))
+        sent = self.client.get(f"/api/tasks/{task['id']}/sent").json()
+        # The record is byte-for-byte what Claude Code read on stdin, flags included.
+        self.assertEqual(sent['prompt'], self.received(task)['prompt'])
+        self.assertTrue(sent['prompt'].startswith(models.SYSTEM))
+        self.assertEqual(sent['args'][0], '-p')
+        self.assertIn('--json-schema', sent['args'])
+        self.assertTrue(sent['resendable'])
+        self.assertFalse(sent['edited'])
+
+        edited = sent['prompt'].replace(models.SYSTEM, '只用中文回答，并且先列出三个问题。\n', 1)
+        response = self.client.post(f"/api/tasks/{task['id']}/resend", json={'prompt': edited})
+        self.assertEqual(response.status_code, 200, response.text)
+        again = self.wait(response.json())
+        self.assertEqual(again['status'], 'completed', again.get('error'))
+        self.assertEqual(self.received(again)['prompt'], edited)
+        self.assertEqual(again['edited_from'], task['id'])
+        self.assertTrue(self.client.get(f"/api/tasks/{again['id']}/sent").json()['edited'])
+        # Re-sending is not a new instruction: the project's instruction history is unchanged.
+        project = store.get('project', self.project['id'])
+        self.assertEqual(project['stage_instruction_chain']['research'], ['订阅任务'])
+
+    def test_resend_is_refused_while_running_or_without_a_record(self):
+        missing = self.client.get('/api/tasks/nope/sent')
+        self.assertEqual(missing.status_code, 400)
+        with patch.object(jobs.QUEUE, 'put'):
+            queued = self.submit('research', workspace=True)
+        self.assertEqual(self.client.get(f"/api/tasks/{queued['id']}/sent").status_code, 400)
+        refused = self.client.post(f"/api/tasks/{queued['id']}/resend", json={'prompt': '改过的原文'})
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn('还没有结束', refused.json()['detail'])
 
     def test_cli_receives_object_schema_for_research_script_and_angles(self):
         for mode, field in [('research', 'topics'), ('script', 'paragraphs'), ('angles', 'angles')]:

@@ -155,10 +155,11 @@ def call(task, mode, context, event, report):
                       '--json-schema', json.dumps(schema(mode))]
     if tools:
         args += ['--allowedTools', tools]
-    prompt = (models.SYSTEM + models.SCHEMAS[mode] + '\n仅完成本次调研或文案，不制作视频，不生成字幕。'
-              + ('\n必须使用实际联网工具，无法访问时如实说明；禁止编造来源、日期和互动数据。' if web else
-                 '\n本次不联网；禁止编造来源、日期和互动数据。')
-              + '\n任务上下文：\n' + json.dumps(context, ensure_ascii=False, default=str))
+    prompt = claude_cli.prompt_override(task) or (
+        models.SYSTEM + models.SCHEMAS[mode] + '\n仅完成本次调研或文案，不制作视频，不生成字幕。'
+        + ('\n必须使用实际联网工具，无法访问时如实说明；禁止编造来源、日期和互动数据。' if web else
+           '\n本次不联网；禁止编造来源、日期和互动数据。')
+        + '\n任务上下文：\n' + json.dumps(context, ensure_ascii=False, default=str))
     # Keep stage inputs for diagnostics without copying login credentials.
     (root / 'context.json').write_text(json.dumps(context, ensure_ascii=False, default=str), encoding='utf-8')
     evidence = Evidence()
