@@ -309,15 +309,19 @@ def prepare(task, event, report):
     project_id = task['project_id']
     work = store.project_file(project_id, WORKDIR)
     work.mkdir(parents=True, exist_ok=True)
-    own = [a for a in task['asset_snapshot'] if not a.get('generated')]
-    folder, taken = work / MATERIALS, set()
+    from . import docs
+    # Same order and names as 素材.md, so the file it names is the file in the folder.
+    own = docs.materials(task['snapshot'], task['asset_snapshot'])
+    names = docs.material_names(own)
+    taken = {name.casefold() for name in names.values()}
+    folder = work / MATERIALS
     if own:
         report('正在放入项目素材')
         folder.mkdir(exist_ok=True)
     for asset in own:
         if event.is_set():
             raise media.Cancelled()
-        source, target = asset_store.file(asset), folder / material_name(asset, taken)
+        source, target = asset_store.file(asset), folder / names[asset['id']]
         if not (target.is_file() and target.stat().st_size == source.stat().st_size):
             copy_input(source, target, event)
     if folder.is_dir():

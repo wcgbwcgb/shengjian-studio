@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from app import claude_cli, cli_guard, config, media, store
+from app import assets as asset_store, claude_cli, cli_guard, config, docs, media, store
 from app.main import app
 
 FFMPEG, FFPROBE = media.executable('ffmpeg'), media.executable('ffprobe')
@@ -232,6 +232,15 @@ class CliVideoTests(unittest.TestCase):
         self.assertEqual(task['status'], 'completed', task.get('error'))
         self.assertEqual(self.received()['materials'], ['main (2).mp4', 'main.mp4', '配乐.mp4'])
         self.assertEqual(self.received()['prompt'], '制作测试视频')
+        # Reordered, the copies are renamed to match what 素材.md says about them.
+        first, second, music = docs.materials(store.get('project', self.project['id']))
+        self.client.put(self.url + '/workspace/materials', json={'order': [music['id'], second['id'], first['id']], 'sequence': 'fixed'})
+        self.assertEqual(self.submit()['status'], 'completed')
+        listed = docs.read(self.project['id'], 'materials')
+        self.assertIn('1. main.mp4（视频 · 0:02）\n2. main (2).mp4（视频 · 0:02）', listed)
+        self.assertIn('## 配乐\n- 配乐.mp4（音乐 · 0:02）', listed)
+        for asset, name in [(second, 'main.mp4'), (first, 'main (2).mp4'), (music, '配乐.mp4')]:
+            self.assertEqual((folder / name).read_bytes(), asset_store.file(asset).read_bytes())
 
     def test_run_without_a_new_video_fails_with_claudes_reply(self):
         for mode, message in [('missing', '我需要更多信息'), ('no_result', '未完成'), ('failed', 'test turn limit'), ('corrupt', '本地处理失败')]:

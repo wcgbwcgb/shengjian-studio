@@ -223,6 +223,41 @@ class IdeationTests(unittest.TestCase):
         self.assertEqual((idea['text'], idea['origin'], idea['can_undo']), ('# 润色后的想法\n松弛感从哪里来\n', 'polish', True))
         self.assertEqual(self.client.post(url + '/docs/idea/undo').json()['text'], '会计转行做配音\n第一次录音很紧张')
 
+    def test_materials_say_what_each_file_is_for(self):
+        pid = self.client.post('/api/creations', json={'name': '我的故事', 'start': False}).json()['project']['id']
+        url = f'/api/projects/{pid}'
+        upload = lambda name, kind=None: self.client.post(url + '/assets' + (f'?type={kind}' if kind else ''),
+                                                          files={'file': (name, name.encode() * 10)}).json()
+        interview, still, style, bgm = upload('采访.mp4'), upload('录音棚.png'), upload('风格参考.mp4'), upload('bgm.mp3', 'Music')
+        self.assertEqual(self.client.get(url).json()['docs']['materials']['text'].count('## '), 2)  # 剪辑素材 + 配乐
+        self.client.patch(url + f"/workspace/materials/{style['id']}", json={'purpose': 'reference', 'note': '学它的开场节奏'})
+        self.client.patch(url + f"/workspace/materials/{interview['id']}", json={'note': '只用 0:30–1:10，保留原声'})
+        self.assertEqual(self.client.patch(url + f"/workspace/materials/{bgm['id']}", json={'purpose': 'nope'}).status_code, 400)
+        ordered = self.client.put(url + '/workspace/materials', json={'order': [still['id'], interview['id']], 'sequence': 'fixed'}).json()
+        self.assertEqual(ordered['order'][:2], [still['id'], interview['id']])
+        self.assertEqual(self.client.put(url + '/workspace/materials', json={'order': ['bogus']}).status_code, 400)
+        text = self.client.get(url).json()['docs']['materials']['text']
+        self.assertIn('## 剪辑素材\n剪辑顺序：按下面的顺序\n1. 录音棚.png（图片）\n2. 采访.mp4（视频） 只用 0:30–1:10，保留原声', text)
+        self.assertIn('## 参考（不剪进成片）\n- 风格参考.mp4（视频） 学它的开场节奏', text)
+        self.assertIn('## 配乐\n- bgm.mp3（音乐）', text)
+        self.assertTrue(docs.path(pid, 'materials').is_file())
+        # The list is the source: the file itself is not edited by hand.
+        self.assertEqual(self.client.put(url + '/workspace/docs/materials', json={'text': 'x'}).status_code, 400)
+        # Video references 文案.md and 素材.md by default; polishing may only reference the materials.
+        self.assertEqual(self.client.post(url + '/workspace/compose', json={'module': 'video', 'request': '做'}).json()['prompt'],
+                         '做\n\n参考当前文件夹里的 素材.md。')
+        polish = self.client.post(url + '/workspace/compose', json={'module': 'polish', 'refs': ['materials', 'research']}).json()
+        self.assertEqual(polish['refs'], ['materials'])
+        self.assertIn('【参考：素材.md】\n# 素材', polish['prompt'])
+        # The copies Claude Code gets carry the names 素材.md uses.
+        project = store.get('project', pid)
+        self.assertEqual(list(docs.material_names(docs.materials(project)).values()),
+                         ['录音棚.png', '采访.mp4', '风格参考.mp4', 'bgm.mp3'])
+        stored = store.get('asset', still['id'])
+        self.assertEqual(self.client.delete(url + f"/workspace/materials/{still['id']}").status_code, 200)
+        self.assertFalse(store.project_file(pid, stored['path']).exists())
+        self.assertNotIn('录音棚.png', self.client.get(url).json()['docs']['materials']['text'])
+
     def test_more_angles_reuse_research(self):
         pid = self.client.post('/api/projects', json={'name': '方向'}).json()['id']
         research = store.put('version', {'stage': 'research', 'result': {'topics': [TOPIC], 'sources': []}}, pid)

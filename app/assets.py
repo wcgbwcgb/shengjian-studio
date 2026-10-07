@@ -102,8 +102,10 @@ def update(ident, body):
                 regions.append({'start': start, 'end': end})
             asset['protected'] = regions
         result = store.put('asset', rules(asset))
+        from . import docs
         for project_id in {old_owner, owner} - {None}:
             project = store.get('project', project_id)
+            docs.refresh_materials(project)
             project['stale_stages'] = sorted(set(project.get('stale_stages', [])) | {'edit'})
             scene_id = project.get('workspace', {}).get('scene_version')
             if old_owner != owner and scene_id and any(s.get('asset_id') == ident for s in store.get('version', scene_id)['result']['scenes']):

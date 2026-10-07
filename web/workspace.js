@@ -3,9 +3,9 @@
 // The workspace owns product-level decisions. Existing app.js retains API, settings,
 // publishing, versions and the advanced editor during the incremental migration.
 const W = {tab:'idea', topic:null, busy:false, saving:null, saveTimer:null, uploadScene:null, videoView:'scenes', intent:'idea', needsRender:false, docDrafts:{}, docOpen:{}};
-const workspaceTabs = {idea:'我的idea',research:'调研',script:'文案',video:'视频'};
+const workspaceTabs = {idea:'我的idea',materials:'素材',research:'调研',script:'文案',video:'视频'};
 // Each module keeps its result in one md file; other modules reference it when sending.
-const DOC_KEYS = ['idea','research','script'];
+const DOC_KEYS = ['idea','materials','research','script'];
 const docs = () => S.detail?.docs || {};
 const docText = key => docs()[key]?.text || '';
 const beatNames = {hook:'开场钩子',context:'引入',evidence:'关键论据',turn:'转折',cta:'收尾 / CTA'};
@@ -49,9 +49,9 @@ function renderWorks() {return `<div class="collection-shell">${heading('我的�
 function renderWorkspace() {
   if(!S.detail)return heading('创作空间','从一个想法开始。')+vbutton('home','开始创作','primary');
   const p=wproject(), script=wversion('script'), scenes=wversion('scenes'), cut=wversion('edit');
-  const direct=['video','assets'].includes(p.workspace?.intent),tabs=direct?{video:'素材与视频'}:workspaceTabs;
-  const done={idea:!!docText('idea').trim(),research:!!wversion('research'),script:!!script,video:!!cut?.preview};
-  const main={idea:()=>workspaceIdea(),research:()=>workspaceResearch(),script:()=>workspaceScript(script),video:()=>workspaceVideo(scenes,cut)}[W.tab]||(()=>workspaceVideo(scenes,cut));
+  const direct=['video','assets'].includes(p.workspace?.intent),tabs=direct?{materials:'素材',video:'视频'}:workspaceTabs;
+  const done={idea:!!docText('idea').trim(),materials:ownMaterials().length>0,research:!!wversion('research'),script:!!script,video:!!cut?.preview};
+  const main={idea:()=>workspaceIdea(),materials:()=>workspaceMaterials(),research:()=>workspaceResearch(),script:()=>workspaceScript(script),video:()=>workspaceVideo(scenes,cut)}[W.tab]||(()=>workspaceVideo(scenes,cut));
   return `<div class="studio-shell"><div class="studio-heading"><div><h1 title="${esc(p.name_custom?p.name:p.selected_topic?.title||p.name)}">${esc(p.name_custom?p.name:p.selected_topic?.title||p.name)}</h1><div class="studio-meta"><span>${esc(p.requirements?.aspect||p.defaults.aspect)}</span><span>约 ${esc(p.requirements?.duration||p.defaults.duration)} 秒</span><span id="draft-status">${readDraft()?'编辑已暂存':'所有进展自动保存'}</span></div></div><div class="button-row">${vbutton('rename-project','重命名','ghost small',`data-id="${p.id}"`)}${vbutton('history','◷ 版本记录','ghost small')}${vbutton('sent-list','✉ 发送记录','ghost small',`title="每次发给 Claude 的原文"`)}</div></div>
     <div class="studio-nav" role="tablist" aria-label="创作阶段">${Object.entries(tabs).map(([tab,title],i)=>vbutton('tab',`<span class="tab-number">${done[tab]?'✓':String(i+1).padStart(2,'0')}</span>${title}`,W.tab===tab?'selected':'',`role="tab" aria-selected="${W.tab===tab}" data-tab="${tab}"`)).join('')}<span class="studio-nav-note">不分先后，用到哪个打开哪个</span></div>
     <div class="studio-layout"><section class="studio-main" aria-label="${workspaceTabs[W.tab]}"><div id="creation-status" aria-live="polite">${workspaceStatus()}</div>${main()}</section><aside class="creative-context">${workspaceContext(p,script,scenes,cut)}</aside></div>${!direct&&['research','script'].includes(W.tab)?chatDrawer():''}</div>`;
@@ -64,7 +64,7 @@ function docStatusList() {
 function workspaceContext(p,script,scenes,cut) {
   const introduction=`<div class="companion-avatar">∿</div><h3>我们正在做的这条视频</h3><p class="context-idea">${esc(wcontext().idea||p.name)}</p>`;
   if(p.workspace?.intent==='video'||cut?.result.engine==='claude_cli')return introduction+`<div class="context-divider"></div><span class="quiet-label">制作方式</span><p>用文字描述内容、画面与节奏。Claude 会结合项目素材完成制作，你可以继续用文字提出修改。</p><span class="quiet-label">项目素材</span><p>${S.detail.assets.filter(a=>!a.generated).length} 个素材 · 原文件保留</p><div class="context-divider"></div><span class="quiet-label">下一步</span><p>${activeTask()?'正在制作并检查成片，完成后会出现在这里。':cut?'播放这一版，再在上方输入修改要求。每次制作都会保存为新版本。':'添加素材或输入制作要求，开始第一版视频。'}</p><div class="context-trail"><span class="complete">你的要求</span><span class="${S.detail.assets.length?'complete':''}">项目素材</span><span class="${cut?.preview?'complete':''}">视频与版本</span></div>${p.stale_stages?.includes('edit')&&cut?'<p class="small-note">项目已有修改。继续制作可生成新版本，旧视频保留。</p>':''}`;
-  const next=activeTask()?'正在处理，完成后会直接出现在这里。':{idea:'把想法写下来，再选一种方式存成 我的idea.md。',research:wversion('research')?'选一个角度写文案，或说说哪里不满意，我再想几个。':'调研会默认参考 我的idea.md。',script:scriptResult()?.paragraphs?'把表达调整到你满意，文案.md 会跟着更新。':'可以直接写，不一定要先调研。'}[W.tab]||(cut?.preview?'播放检查这一版，需要修改就在下方写下要求。':'写下制作要求，可以勾选参考 文案.md。');
+  const next=activeTask()?'正在处理，完成后会直接出现在这里。':{idea:'把想法写下来，再选一种方式存成 我的idea.md。',materials:ownMaterials().length?'标明每个素材的用途，需要按顺序剪就排好顺序。':'上传这个项目要用的视频、图片和音乐。',research:wversion('research')?'选一个角度写文案，或说说哪里不满意，我再想几个。':'调研会默认参考 我的idea.md。',script:scriptResult()?.paragraphs?'把表达调整到你满意，文案.md 会跟着更新。':'可以直接写，不一定要先调研。'}[W.tab]||(cut?.preview?'播放检查这一版，需要修改就在下方写下要求。':'写下制作要求，可以勾选参考 文案.md。');
   return `<h3>这个项目的文件</h3><p class="small-note">每个模块的结果存成一个 md 文件。发送前勾选，就能让另一个模块参考它。</p>${docStatusList()}${wcontext().angle?.title?`<div class="context-divider"></div><span class="quiet-label">文案角度</span><p>${esc(wcontext().angle.title)}</p>`:''}<div class="context-divider"></div><span class="quiet-label">下一步</span><p>${next}</p>${p.stale_stages?.includes('edit')&&cut?'<p class="small-note">已有修改。旧版视频保留，继续制作即可生成新版本。</p>':''}`;
 }
 
@@ -154,6 +154,7 @@ function docOrigin(d) {
 // The file other modules reference. Edits are kept as a draft until saved.
 function docPanel(key,open=false) {
   const d=docs()[key]||{name:key,text:''}, draft=W.docDrafts[key], text=draft??d.text, chars=d.text.trim().length;
+  if(d.generated)return `<details class="doc-panel" data-doc-panel="${key}" ${W.docOpen[key]??open?'open':''}><summary><span class="doc-name">${esc(d.name)}</span><small>${chars?chars+' 字 · 由素材列表自动生成':'还没有素材'}</small></summary><textarea class="doc-editor" rows="10" readonly aria-label="${esc(d.name)}">${esc(text)}</textarea><div class="doc-actions"><span class="small-note">这份文件跟着上面的列表自动更新：改用途、说明或顺序就行。其他模块发送时勾选「${esc(d.name)}」就会参考它。</span></div></details>`;
   const status=draft!==undefined?'有未保存的修改':chars?[`${chars} 字`,docOrigin(d),d.updated_at&&date(d.updated_at)].filter(Boolean).join(' · '):'还没有内容';
   const isOpen=W.docOpen[key]??(open||draft!==undefined);
   return `<details class="doc-panel" data-doc-panel="${key}" ${isOpen?'open':''}><summary><span class="doc-name">${esc(d.name)}</span><small data-doc-status="${key}">${status}</small></summary>
@@ -170,10 +171,51 @@ function workspaceIdea() {
   return `<section class="idea-module"><div class="section-heading"><div><span class="eyebrow">MY IDEA</span><h2>先把你的想法都倒出来</h2></div></div>
     <p class="section-caption">想到什么写什么，零散、重复都没关系。写好后选一种方式，把它变成「我的idea.md」：调研、文案和视频都可以参考它。</p>
     <label for="brainstorm" class="quiet-label">灵感碎片</label><textarea id="brainstorm" class="brainstorm" rows="8" maxlength="20000" placeholder="例如：想讲我从会计转行做配音的故事。第一次进录音棚很紧张……想让同样想转行的人看到。">${esc(brainstorm)}</textarea><p class="small-note" id="brainstorm-status">自动保存</p>
+    <div class="idea-materials"><span>参考视频、图片也可以传上来，用途会标成「参考」。</span>${vbutton('upload-reference','＋ 上传参考素材','small')}${ownMaterials().length?vbutton('tab',`已有 ${ownMaterials().length} 个素材 · 去管理 →`,'text-button small','data-tab="materials"'):''}<input id="workspace-assets" type="file" accept="video/*,audio/*,image/png,image/jpeg,image/webp" multiple hidden></div>
     <div class="idea-ways">${ways.map(([action,title,note,attr])=>`<button class="idea-way" data-action="v2-${action}" ${attr}><strong>${title}</strong><span>${note}</span></button>`).join('')}</div>
     ${W.ideaChat||chatMessages().length?`<div class="clarify-chat idea-chat">${chatThread()}</div>`:''}
     <h3 class="doc-heading">结果</h3>${docPanel('idea',true)}
     <div class="module-next">${vbutton('tab','去调研 →','small','data-tab="research"')}${vbutton('tab','直接写文案 →','small ghost','data-tab="script"')}</div></section>`;
+}
+
+// The project's materials: what each one is for, in the order to cut them.
+const PURPOSES = {edit:'剪辑素材',reference:'参考',music:'配乐',other:'其他'};
+const ownMaterials = () => {
+  const order=wcontext().material_order||[], own=(S.detail?.assets||[]).filter(a=>!a.generated).slice().sort((a,b)=>a.created_at.localeCompare(b.created_at));
+  const at=id=>{const i=order.indexOf(id);return i<0?order.length:i;};
+  return own.sort((a,b)=>at(a.id)-at(b.id));
+};
+const materialPurpose = a => a.purpose||(mediaType(a)==='Music'?'music':'edit');
+function materialRow(a,i,list) {
+  const type=mediaType(a), frame=a.analysis?.frames?.[0], purpose=materialPurpose(a), duration=a.analysis?.duration||a.duration;
+  const thumb=type==='Image'?`<img src="${assetURL(a)}" alt="">`:frame?`<img src="/api/assets/${a.id}/frames/0" alt="">`:`<span>${type==='Music'||type==='Audio'?'♫':'▷'}</span>`;
+  const position=purpose==='edit'&&wcontext().material_sequence==='fixed'?list.filter(x=>materialPurpose(x)==='edit').indexOf(a)+1:'';
+  return `<article class="material-row" draggable="true" data-material="${a.id}"><div class="material-order"><span class="drag-handle" title="拖动调整顺序" aria-hidden="true">⋮⋮</span>${position?`<b>${position}</b>`:''}</div><div class="brief-thumb">${thumb}</div>
+    <div class="material-main"><div class="material-title"><a href="${assetURL(a)}" target="_blank" rel="noopener" title="${esc(a.name)}">${esc(a.name)}</a><small>${type}${duration&&type!=='Image'?' · '+timecode(duration):''}</small></div>
+    <div class="material-fields"><label class="sr-only" for="purpose-${a.id}">用途</label><select id="purpose-${a.id}" data-material-purpose="${a.id}">${Object.entries(PURPOSES).map(([k,v])=>`<option value="${k}" ${k===purpose?'selected':''}>${v}</option>`).join('')}</select>${purpose==='other'?`<input data-material-label="${a.id}" maxlength="40" placeholder="用途，例如：封面" value="${esc(a.purpose_label||'')}" aria-label="自定义用途">`:''}</div>
+    <textarea data-material-note="${a.id}" rows="2" maxlength="4000" placeholder="${{edit:'说明（可选）：例如 只用 0:30–1:10，保留原声',reference:'说明（可选）：参考它的什么？例如 开场节奏、字幕风格',music:'说明（可选）：例如 从副歌开始，完整保留',other:'说明（可选）'}[purpose]}" aria-label="${esc(a.name)} 的说明">${esc(a.note||'')}</textarea></div>
+    <div class="material-actions">${vbutton('material-move','↑','small ghost',`data-id="${a.id}" data-step="-1" aria-label="上移" ${i===0?'disabled':''}`)}${vbutton('material-move','↓','small ghost',`data-id="${a.id}" data-step="1" aria-label="下移" ${i===list.length-1?'disabled':''}`)}${vbutton('material-remove','移除','text-button small danger-text',`data-id="${a.id}"`)}</div></article>`;
+}
+function workspaceMaterials() {
+  const list=ownMaterials(), fixed=wcontext().material_sequence==='fixed';
+  const counts=Object.entries(PURPOSES).map(([k,v])=>[v,list.filter(a=>materialPurpose(a)===k).length]).filter(([,n])=>n).map(([v,n])=>`${v} ${n}`).join(' · ');
+  return `<section class="materials-module"><div class="section-heading"><div><span class="eyebrow">MATERIALS</span><h2>素材</h2></div><span class="quiet-label">${list.length?counts:'还没有素材'}</span></div>
+    <p class="section-caption">这个项目要用的素材都放在这里。标明每个是拿来做什么的，需要的话写一句说明。它们会整理成「素材.md」，做视频时勾选参考，Claude 就知道该怎么用。</p>
+    <div class="materials-toolbar">${assetUploadControl()}${vbutton('public-picker','从公共库添加','small ghost')}</div>
+    <div class="material-sequence" role="radiogroup" aria-label="剪辑顺序"><span class="quiet-label">剪辑素材的顺序</span><label><input type="radio" name="material-sequence" value="fixed" ${fixed?'checked':''}>按下面排好的顺序剪</label><label><input type="radio" name="material-sequence" value="free" ${fixed?'':'checked'}>让 Claude 决定</label></div>
+    <div class="material-list" id="material-list">${list.map(materialRow).join('')||'<p class="muted brief-empty">还没有素材。上传视频、图片或音频，或者从公共素材库添加。</p>'}</div>
+    ${list.length>1?'<p class="small-note">拖动或用 ↑↓ 调整顺序。</p>':''}
+    ${docPanel('materials')}<input id="workspace-assets" type="file" accept="video/*,audio/*,image/png,image/jpeg,image/webp" multiple hidden></section>`;
+}
+async function saveMaterial(id,body) {
+  const saved=await api(`/projects/${S.selected}/workspace/materials/${id}`,body,'PATCH');
+  const i=S.detail.assets.findIndex(a=>a.id===id);if(i>=0)S.detail.assets[i]={...S.detail.assets[i],...saved};
+  S.detail.docs=(await api(`/projects/${S.selected}`)).docs;
+}
+async function saveMaterialOrder(body) {
+  const result=await api(`/projects/${S.selected}/workspace/materials`,body,'PUT');
+  wproject().workspace={...wcontext(),material_order:result.order,material_sequence:result.sequence};
+  await refresh();
 }
 
 function researchStart() {
@@ -196,7 +238,7 @@ async function sendModal(module,{request=null,refs=null,extra={}}={}) {
   if(readDraft())await flushScript();
   const c=await api(`/projects/${S.selected}/workspace/compose`,{module,request,refs});
   W.send={module,extra,edited:false};
-  const refBoxes=module==='polish'?'':`<div class="send-refs"><span class="quiet-label">参考</span>${DOC_KEYS.map(key=>{const d=docs()[key]||{name:key,text:''},n=d.text.trim().length;return `<label class="send-ref ${n?'':'empty'}"><input type="checkbox" data-send-ref="${key}" ${c.refs.includes(key)?'checked':''} ${n?'':'disabled'}>${esc(d.name)}<small>${n?n+' 字':'还没有内容'}</small></label>`;}).join('')}</div>`;
+  const refBoxes=`<div class="send-refs"><span class="quiet-label">参考</span>${(module==='polish'?['materials']:DOC_KEYS).map(key=>{const d=docs()[key]||{name:key,text:''},n=d.text.trim().length;return `<label class="send-ref ${n?'':'empty'}"><input type="checkbox" data-send-ref="${key}" ${c.refs.includes(key)?'checked':''} ${n?'':'disabled'}>${esc(d.name)}<small>${n?n+' 字':'还没有内容'}</small></label>`;}).join('')}</div>`;
   const stage=module==='research'?'research':'script';
   modal(`发送给 Claude：${SEND[module].title}`,`<label for="send-request">这次的要求</label><textarea id="send-request" rows="4" maxlength="20000" placeholder="${module==='video'?'写下视频制作要求':'写下这次的要求'}">${esc(c.request)}</textarea>${refBoxes}
     <div class="send-full-head"><label for="send-prompt">将发送的完整原文</label><span id="send-state" class="small-note">${sendState()}</span></div>
@@ -263,7 +305,8 @@ const BRIEF_PRESETS = [
 function briefAsset(a) {
   const type=mediaType(a), frame=a.analysis?.frames?.[0];
   const thumb=type==='Image'?`<img src="${assetURL(a)}" alt="">`:frame?`<img src="/api/assets/${a.id}/frames/0" alt="">`:`<span>${type==='Music'||type==='Audio'?'♫':'▷'}</span>`;
-  return `<div class="brief-asset" data-brief-asset="${a.id}"><div class="brief-thumb">${thumb}</div><div class="brief-asset-main"><div class="brief-asset-title"><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${type}${a.analysis?.duration&&type!=='Image'?' · '+timecode(a.analysis.duration):''}</small></div></div></div>`;
+  const duration=a.analysis?.duration||a.duration;
+  return `<div class="brief-asset" data-brief-asset="${a.id}"><div class="brief-thumb">${thumb}</div><div class="brief-asset-main"><div class="brief-asset-title"><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${PURPOSES[materialPurpose(a)]}${materialPurpose(a)==='other'&&a.purpose_label?'（'+esc(a.purpose_label)+'）':''} · ${type}${duration&&type!=='Image'?' · '+timecode(duration):''}</small></div>${a.note?`<p class="brief-note">${esc(a.note)}</p>`:''}</div></div>`;
 }
 function videoBrief(cut) {
   const cli=S.env.claude_cli||{}, task=activeTask(), last=S.detail?.tasks.find(t=>t.kind==='cli_video');
@@ -274,8 +317,8 @@ function videoBrief(cut) {
     <div class="brief-presets" aria-label="快速填写">${BRIEF_PRESETS.map(([label],i)=>vbutton('brief-preset',label,'rewrite-chip',`data-index="${i}"`)).join('')}</div>
     <label for="cli-prompt" class="sr-only">视频制作或修改要求</label><textarea id="cli-prompt" maxlength="20000" rows="5" placeholder="例如：参考那条风格视频，用我的素材剪一条 45 秒的竖屏视频，开头先放最精彩的一幕，配乐完整保留。">${esc(prompt)}</textarea>
     <div class="brief-options">${cut?`<label class="brief-toggle"><input type="checkbox" id="brief-continue" checked> 在当前版本上修改（取消则重新制作一版）</label>`:''}</div>
-    <div class="brief-materials"><div class="brief-materials-head"><h3>素材 <span class="muted">${own.length}</span></h3><div class="button-row">${vbutton('public-picker','从公共库添加','text-button small')}</div></div>${assetUploadControl()}
-    ${own.length?`<div class="brief-asset-list">${own.map(briefAsset).join('')}</div><p class="small-note brief-legend">素材会放在 Claude 工作文件夹的「素材」目录里，想怎么用直接写在要求中。</p>`:'<p class="muted brief-empty">没有素材也可以开始：Claude 会用动态图形和文字动画从零制作。</p>'}</div>
+    <div class="brief-materials"><div class="brief-materials-head"><h3>素材 <span class="muted">${own.length}</span></h3>${vbutton('tab','管理素材 →','text-button small','data-tab="materials"')}</div>
+    ${own.length?`<div class="brief-asset-list">${ownMaterials().map(briefAsset).join('')}</div><p class="small-note brief-legend">素材会放在 Claude 工作文件夹的「素材」目录里。发送时勾选「素材.md」，Claude 就知道每个素材的用途、说明和剪辑顺序。</p>`:'<p class="muted brief-empty">没有素材也可以开始：Claude 会用动态图形和文字动画从零制作。需要素材的话，到「素材」里上传。</p>'}</div>
     <div class="cli-composer-footer"><span class="small-note">${cli.installed?'使用这台电脑上的 Claude Code · 可联网、安装制作工具':'先在设置中连接本机 Claude Code'}</span>${vbutton('cli-run',cut?'按要求生成新版…':'让 Claude 制作完整视频…','primary',task?'disabled':'')}</div>${!cli.installed?vbutton('connect','设置本机 Claude Code →','text-button small'):''}${last?.status==='completed'&&last.cli_result?.num_turns?`<p class="small-note">上次制作完成 · ${last.cli_result.num_turns} 轮执行 · ${Math.max(1,Math.round((last.elapsed_sec||0)/60))} 分钟</p>`:''}</section>`;
 }
 function advancedScenes(scenes,cut) {
@@ -491,6 +534,17 @@ async function handleV2(action,el) {
   }
   if(a==='idea-polish'){await flushBrainstorm();if(!(W.brainstorm??wcontext().brainstorm??'').trim()){$('#brainstorm')?.focus();throw new Error('先在灵感碎片里写点什么。');}return sendModal('polish');}
   if(a==='idea-chat'){await flushBrainstorm();W.ideaChat=true;render();(chatMessages().length?$('#chat-input'):$('[data-action="v2-chat-start"]'))?.focus();return;}
+  if(a==='upload-reference'){W.uploadPurpose='reference';$('#workspace-assets').click();return;}
+  if(a==='material-move'){
+    const ids=ownMaterials().map(m=>m.id),i=ids.indexOf(el.dataset.id),j=i+Number(el.dataset.step);
+    if(i<0||j<0||j>=ids.length)return;
+    [ids[i],ids[j]]=[ids[j],ids[i]];await saveMaterialOrder({order:ids});return;
+  }
+  if(a==='material-remove'){
+    const m=ownMaterials().find(m=>m.id===el.dataset.id);if(!m)return;
+    if(!el.dataset.confirmed){modal('移除这个素材？',`<p>「${esc(m.name)}」会从这个项目里删除，素材.md 也会去掉它。已经做好的视频不受影响。</p>`,button('close-modal','取消','ghost')+vbutton('material-remove','移除','danger',`data-id="${m.id}" data-confirmed="1"`));return;}
+    await api(`/projects/${S.selected}/workspace/materials/${m.id}`,{},'DELETE');if($('#modal').open)$('#modal').close();await refresh();toast('已移除。');return;
+  }
   if(a==='script-own')return sendModal('script',{request:'按我的方向写一条短视频文案：\n'});
   if(a==='chat-toggle'){W.chatOpen=!W.chatOpen;const drawer=$('.chat-drawer');if(drawer){drawer.classList.toggle('open',W.chatOpen);$('.chat-fab')?.setAttribute('aria-expanded',String(W.chatOpen));if(W.chatOpen){const thread=drawer.querySelector('.chat-thread');if(thread)thread.scrollTop=thread.scrollHeight;$('#chat-input')?.focus();}}return;}
   if(a==='more-angles'){
@@ -581,19 +635,20 @@ async function handleV2(action,el) {
 async function workspaceUpload(files,home=false) {
   const mediaType=$(`#${home?'home':'project'}-upload-type`)?.value||'';
   if(home)await createIdea(`从这些素材开始：${files.map(f=>f.name).join('、')}`,'assets');
-  const id=S.selected,sceneId=W.uploadScene;let last;
+  const id=S.selected,sceneId=W.uploadScene,purpose=W.uploadPurpose;let last;
   try {
     for(const [index,file] of files.entries()){
       toast(`正在收好素材 ${index+1}/${files.length}：${file.name}`);
       const form=new FormData();form.append('file',file);
       last=await api(`/projects/${id}/assets${mediaType?'?type='+encodeURIComponent(mediaType):''}`,form);
+      if(purpose)await api(`/projects/${id}/workspace/materials/${last.id}`,{purpose},'PATCH');
     }
     await refresh(false);
     if(sceneId&&last)await patchScene(sceneId,{asset_id:last.id});
     if($('#modal').open)$('#modal').close();
-    if(home){const result=await api(`/projects/${id}/workspace/start-video`,{submit:false});W.tab='video';await refresh();toast(result.needs_cli?'素材已保存。连接本机 Claude Code 后开始制作。':'素材已保存。写下要求，就可以开始制作。');}
-    else {await refresh();toast('素材已保存，想怎么用写在要求里即可。');}
-  }finally{W.uploadScene=null;}
+    if(home){const result=await api(`/projects/${id}/workspace/start-video`,{submit:false});W.tab='materials';history.replaceState(null,'',`#workspace/${id}/materials`);await refresh();toast(result.needs_cli?'素材已保存。标明用途后，连接本机 Claude Code 就能开始制作。':'素材已保存。标明每个素材的用途，再去「视频」写要求。');}
+    else {await refresh();toast(purpose==='reference'?'已上传，用途标为「参考」。':'素材已保存。可以在「素材」里标明用途和说明。');}
+  }finally{W.uploadScene=null;W.uploadPurpose=null;}
 }
 
 document.addEventListener('input',event=>{
@@ -609,6 +664,11 @@ document.addEventListener('input',event=>{
   if(el.id==='chat-input')sessionStorage.setItem(`studio-chat:${S.selected}`,el.value);
   if(el.id==='brainstorm'){W.brainstorm=el.value;$('#brainstorm-status').textContent='正在保存…';clearTimeout(W.brainstormTimer);W.brainstormTimer=setTimeout(()=>flushBrainstorm().catch(error=>toast(error.message,true)),800);}
   if(el.dataset.doc){const key=el.dataset.doc;W.docDrafts[key]=el.value;const save=$(`[data-action="v2-doc-save"][data-key="${key}"]`);if(save)save.disabled=false;const status=$(`[data-doc-status="${key}"]`);if(status)status.textContent='有未保存的修改';}
+  if(el.dataset.materialNote||el.dataset.materialLabel){
+    const id=el.dataset.materialNote||el.dataset.materialLabel,field=el.dataset.materialNote?'note':'purpose_label';
+    W.materialTimers=W.materialTimers||{};clearTimeout(W.materialTimers[id+field]);
+    W.materialTimers[id+field]=setTimeout(()=>saveMaterial(id,{[field]:el.value}).catch(error=>toast(error.message,true)),700);
+  }
   if(el.id==='send-request'){clearTimeout(W.composeTimer);W.composeTimer=setTimeout(()=>recompose().catch(error=>toast(error.message,true)),400);}
   if(el.id==='send-prompt'&&W.send&&!W.send.edited){W.send.edited=true;$('#send-state').innerHTML=sendState();}
   if(el.id==='angle-feedback')W.angleFeedback=el.value;
@@ -633,9 +693,21 @@ document.addEventListener('change',async event=>{
     if(el.id==='workspace-assets'&&el.files.length)await workspaceUpload([...el.files]);
     if(el.dataset.rewriteMore&&el.value)await handleV2('v2-rewrite',{dataset:{id:el.dataset.rewriteMore,instruction:el.value}});
     if(el.dataset.sendRef)await recompose();
+    if(el.dataset.materialPurpose){await saveMaterial(el.dataset.materialPurpose,{purpose:el.value});render();}
+    if(el.name==='material-sequence')await saveMaterialOrder({sequence:el.value});
   }catch(error){toast(error.message,true);}
 });
 document.addEventListener('keydown',event=>{if((event.target.id==='new-project-name'&&event.key==='Enter'&&!event.isComposing)||(event.target.id==='new-project-idea'&&event.key==='Enter'&&(event.ctrlKey||event.metaKey))){event.preventDefault();$('[data-action="v2-new-project"]')?.click();return;}if(event.target.id==='chat-input'&&event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();$('[data-action="v2-chat-send"]:not([disabled])')?.click();return;}if(event.target.id==='project-name'&&event.key==='Enter'){event.preventDefault();$('[data-action="v2-save-project-name"]')?.click();return;}if(event.target.id==='creation-idea'&&(event.ctrlKey||event.metaKey)&&event.key==='Enter'){$('[data-action="v2-direct-video"]').click();event.preventDefault();}});
+// Drag a material row onto another to move it there.
+document.addEventListener('dragstart',event=>{const row=event.target.closest?.('[data-material]');if(!row)return;W.dragMaterial=row.dataset.material;row.classList.add('dragging');event.dataTransfer.effectAllowed='move';});
+document.addEventListener('dragend',event=>{event.target.closest?.('[data-material]')?.classList.remove('dragging');$$('.material-row.drop-target').forEach(r=>r.classList.remove('drop-target'));});
+document.addEventListener('dragover',event=>{const row=event.target.closest?.('[data-material]');if(!row||!W.dragMaterial)return;event.preventDefault();$$('.material-row.drop-target').forEach(r=>{if(r!==row)r.classList.remove('drop-target');});row.classList.add('drop-target');});
+document.addEventListener('drop',async event=>{
+  const row=event.target.closest?.('[data-material]'),moved=W.dragMaterial;W.dragMaterial=null;
+  if(!row||!moved||row.dataset.material===moved)return;event.preventDefault();
+  const ids=ownMaterials().map(m=>m.id).filter(id=>id!==moved);ids.splice(ids.indexOf(row.dataset.material)+(ownMaterials().findIndex(m=>m.id===moved)<ownMaterials().findIndex(m=>m.id===row.dataset.material)?1:0),0,moved);
+  try{await saveMaterialOrder({order:ids});}catch(error){toast(error.message,true);}
+});
 document.addEventListener('toggle',event=>{if(event.target.matches?.('details[data-advanced]'))W.advancedOpen=event.target.open;if(event.target.matches?.('details[data-doc-panel]'))W.docOpen[event.target.dataset.docPanel]=event.target.open;},true);
 window.addEventListener('beforeunload',event=>{if(readDraft()||Object.keys(W.docDrafts).length){event.preventDefault();event.returnValue='';}});
 

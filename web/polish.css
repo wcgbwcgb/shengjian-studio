@@ -156,3 +156,29 @@ button:disabled,button[disabled]{opacity:.5;cursor:not-allowed}
 .doc-status li.complete .doc-link span{color:var(--ink)}
 .doc-link small{font-size:11px}
 @media(max-width:800px){.idea-ways{grid-template-columns:minmax(0,1fr)}.doc-actions{flex-direction:column;align-items:stretch}}
+/* 素材: what each material is for, in cutting order */
+.idea-materials{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 18px;font-size:12px;color:var(--muted)}
+.materials-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px}
+.materials-toolbar .asset-upload-controls{margin:8px 0}
+.material-sequence{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin:6px 0 14px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#fcfdfa}
+.material-sequence label{margin:0;font-size:12px;color:var(--ink);cursor:pointer}
+.material-sequence input{width:auto;margin:0;accent-color:var(--green)}
+.material-list{display:grid;gap:10px}
+.material-row{display:grid;grid-template-columns:34px 64px minmax(0,1fr) auto;gap:12px;align-items:start;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.material-row.dragging{opacity:.45}
+.material-row.drop-target{border-color:var(--green);box-shadow:0 0 0 2px #27785d1f}
+.material-order{display:grid;justify-items:center;gap:4px;padding-top:8px;color:#a3ad9e}
+.drag-handle{cursor:grab;letter-spacing:-2px;font-size:13px;user-select:none}
+.material-order b{font-size:12px;color:var(--green)}
+.material-main{display:grid;gap:8px;min-width:0}
+.material-title{display:flex;align-items:baseline;gap:10px;min-width:0}
+.material-title a{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.material-title small{font-size:11px;color:var(--muted);white-space:nowrap}
+.material-fields{display:flex;gap:8px;flex-wrap:wrap}
+.material-fields select{width:auto;min-width:120px;padding:6px 10px;font-size:12px}
+.material-fields input{width:180px;padding:6px 10px;font-size:12px}
+.material-main textarea{font-size:12px;line-height:1.6;min-height:40px;padding:7px 10px}
+.material-actions{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.material-actions .small{padding:5px 10px}
+.brief-note{margin:3px 0 0;font-size:11px;color:#6b776c;line-height:1.6}
+@media(max-width:700px){.material-row{grid-template-columns:28px minmax(0,1fr)}.material-row .brief-thumb{display:none}.material-actions{grid-column:2;flex-direction:row}}

@@ -383,6 +383,12 @@ def doc_key(key):
     return key
 
 
+def editable_key(key):
+    if doc_key(key) == 'materials':
+        raise ValueError('素材.md 由素材列表生成，请在「素材」里修改用途和说明')
+    return key
+
+
 @router.put('/projects/{project_id}/workspace/docs/{key}')
 def save_doc(project_id: str, key: str, body: DocText):
     """The creator's own text. 原封不动 saves the brainstorm as-is."""
@@ -390,7 +396,7 @@ def save_doc(project_id: str, key: str, body: DocText):
         raise ValueError('来源不支持')
     with jobs.LOCK:
         p = store.get('project', project_id)
-        docs.write(p, doc_key(key), body.text, body.origin)
+        docs.write(p, editable_key(key), body.text, body.origin)
         docs.meta(p)[key].pop('pending', None)
         store.put('project', p)
         return docs.status(p)[key]
@@ -400,7 +406,7 @@ def save_doc(project_id: str, key: str, body: DocText):
 def undo_doc(project_id: str, key: str):
     with jobs.LOCK:
         p = store.get('project', project_id)
-        docs.undo(p, doc_key(key))
+        docs.undo(p, editable_key(key))
         store.put('project', p)
         return docs.status(p)[key]
 
@@ -410,7 +416,7 @@ def sync_doc(project_id: str, key: str):
     """Overwrite a hand-edited 调研.md / 文案.md with the newest result."""
     with jobs.LOCK:
         p = store.get('project', project_id)
-        version = current_research(p) if doc_key(key) == 'research' else current_script(p) if key == 'script' else None
+        version = current_research(p) if editable_key(key) == 'research' else current_script(p) if key == 'script' else None
         if not version:
             raise ValueError('还没有可以写入的结果')
         docs.meta(p)[key] = {k: v for k, v in docs.meta(p).get(key, {}).items() if k != 'pending'} | {'origin': 'sync'}
@@ -430,7 +436,8 @@ def compose_parts(p, body):
         raise ValueError('不支持的模块')
     request = docs.default_request(p, body.module) if body.request is None else body.request
     refs = docs.default_refs(p, body.module) if body.refs is None else [doc_key(k) for k in body.refs]
-    return request, refs
+    allowed = docs.ALLOWED_REFS.get(body.module)
+    return request, [k for k in refs if allowed is None or k in allowed]
 
 
 @router.post('/projects/{project_id}/workspace/compose')
@@ -497,6 +504,82 @@ def run(project_id: str, body: Run):
             message['action_task_id'] = task['id']
             store.put('message', message, project_id)
         return task
+
+
+class MaterialUpdate(BaseModel):
+    purpose: str | None = None
+    purpose_label: str | None = Field(default=None, max_length=40)
+    note: str | None = Field(default=None, max_length=4000)
+
+
+def own_material(project_id, asset_id):
+    asset = store.get('asset', asset_id)
+    if asset.get('project_id') != project_id or asset.get('generated'):
+        raise ValueError('素材不属于当前项目')
+    return asset
+
+
+@router.patch('/projects/{project_id}/workspace/materials/{asset_id}')
+def update_material(project_id: str, asset_id: str, body: MaterialUpdate):
+    """What a material is for: cut into the video, a reference, the music, or the creator's own words."""
+    with jobs.LOCK:
+        asset = own_material(project_id, asset_id)
+        if body.purpose is not None:
+            if body.purpose not in docs.PURPOSES:
+                raise ValueError('素材用途不支持')
+            asset['purpose'] = body.purpose
+        for field in ('purpose_label', 'note'):
+            if getattr(body, field) is not None:
+                asset[field] = getattr(body, field).strip()
+        asset = store.put('asset', asset, project_id)
+        p = store.get('project', project_id)
+        docs.refresh_materials(p)
+        store.put('project', p)
+        return asset_store.describe(asset)
+
+
+class MaterialOrder(BaseModel):
+    order: list[str] | None = None
+    sequence: str | None = None  # fixed: cut in this order; free: Claude decides
+
+
+@router.put('/projects/{project_id}/workspace/materials')
+def order_materials(project_id: str, body: MaterialOrder):
+    with jobs.LOCK:
+        p = store.get('project', project_id)
+        w = workspace(p)
+        if body.order is not None:
+            own = {a['id'] for a in docs.materials(p)}
+            if len(set(body.order)) != len(body.order) or not set(body.order) <= own:
+                raise ValueError('素材顺序与当前素材不一致，请刷新页面')
+            w['material_order'] = body.order + [a['id'] for a in docs.materials(p) if a['id'] not in body.order]
+        if body.sequence is not None:
+            if body.sequence not in ('fixed', 'free'):
+                raise ValueError('剪辑顺序设置不支持')
+            w['material_sequence'] = body.sequence
+        docs.refresh_materials(p)
+        store.put('project', p)
+        return {'order': w.get('material_order', []), 'sequence': w.get('material_sequence', 'free')}
+
+
+@router.delete('/projects/{project_id}/workspace/materials/{asset_id}')
+def remove_material(project_id: str, asset_id: str):
+    with jobs.LOCK:
+        idle(project_id)
+        asset = own_material(project_id, asset_id)
+        store.delete('asset', asset_id)
+        # The file goes too, unless another record (the library, another project) still uses it.
+        owner = asset.get('storage_project_id', project_id)
+        if not any(a.get('path') == asset['path'] and a.get('storage_project_id', a.get('project_id')) == owner
+                   for a in store.listing('asset')):
+            asset_store.file(asset).unlink(missing_ok=True)
+        p = store.get('project', project_id)
+        w = workspace(p)
+        w['material_order'] = [i for i in w.get('material_order', []) if i != asset_id]
+        invalidate(p, 'edit')
+        docs.refresh_materials(p)
+        store.put('project', p)
+        return {'ok': True}
 
 
 def execute_polish(task, event, report):
@@ -791,6 +874,7 @@ def import_asset(project_id: str, body: AssetImport):
         a.update(id=ident, path=relative, scope='project', storage_project_id=project_id)
         result = store.put('asset', a, project_id)
         invalidate(p, 'edit')
+        docs.refresh_materials(p)
         store.put('project', p)
         return result
 

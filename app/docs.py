@@ -1,17 +1,23 @@
-"""The project's hand-off files: 我的idea.md, 调研.md and 文案.md.
+"""The project's hand-off files: 我的idea.md, 素材.md, 调研.md and 文案.md.
 
 Each module keeps its result in one file so another module can reference it. They live
 in the folder Claude Code makes videos in, so a video run can open them by name; research,
 writing and polishing runs get the referenced text pasted into the prompt instead. The
 creator can edit any file; the platform then stops overwriting it from new results.
+素材.md is the exception: it is written from the project's material list, which is where
+the creator says what each material is for.
 """
 from . import models, store
 from .claude_cli import WORKDIR
 
-NAMES = {'idea': '我的idea.md', 'research': '调研.md', 'script': '文案.md'}
+NAMES = {'idea': '我的idea.md', 'materials': '素材.md', 'research': '调研.md', 'script': '文案.md'}
 MODULES = ('polish', 'research', 'script', 'video')
 # What each module references unless the creator unticks it.
-DEFAULT_REFS = {'polish': (), 'research': ('idea',), 'script': ('idea', 'research'), 'video': ('script',)}
+DEFAULT_REFS = {'polish': (), 'research': ('idea',), 'script': ('idea', 'research'), 'video': ('script', 'materials')}
+# Polishing the idea may only look at the materials; the other files come after it.
+ALLOWED_REFS = {'polish': ('materials',)}
+PURPOSES = {'edit': '剪辑素材', 'reference': '参考', 'music': '配乐', 'other': '其他'}
+TYPE_NAMES = {'Video': '视频', 'Image': '图片', 'Audio': '音频', 'Music': '音乐'}
 
 
 def path(project_id, key):
@@ -66,8 +72,66 @@ def status(project):
         entry = meta(project).get(key, {})
         result[key] = {'name': name, 'text': read(project['id'], key), 'origin': entry.get('origin'),
                        'updated_at': entry.get('updated_at'), 'can_undo': bool(entry.get('previous')),
-                       'pending': entry.get('pending')}
+                       'pending': entry.get('pending'), 'generated': key == 'materials'}
     return result
+
+
+def purpose(asset):
+    from .assets import asset_type
+    return asset.get('purpose') or ('music' if asset_type(asset) == 'Music' else 'edit')
+
+
+def materials(project, assets=None):
+    """The project's own materials in the creator's order; new ones go last."""
+    own = [a for a in (store.listing('asset', project['id']) if assets is None else assets) if not a.get('generated')]
+    own.sort(key=lambda a: a['created_at'])
+    order = {ident: i for i, ident in enumerate(project.get('workspace', {}).get('material_order', []))}
+    return sorted(own, key=lambda a: order.get(a['id'], len(order)))
+
+
+def material_names(assets):
+    """The file name each material gets in the 素材 folder, the same for 素材.md and the copies."""
+    from .claude_cli import material_name
+    taken = set()
+    return {a['id']: material_name(a, taken) for a in assets}
+
+
+def _length(seconds):
+    seconds = int(seconds or 0)  # Whole seconds, as the workbench shows them.
+    return f'{seconds // 60}:{seconds % 60:02d}'
+
+
+def render_materials(project, assets=None):
+    from .assets import asset_type
+    own = materials(project, assets)
+    if not own:
+        return ''
+    names = material_names(own)
+    fixed = project.get('workspace', {}).get('material_sequence') == 'fixed'
+    lines = ['# 素材', '', '制作视频时，这些文件在 Claude 工作文件夹的 素材/ 里。']
+    for key, title in (('edit', '剪辑素材'), ('reference', '参考（不剪进成片）'), ('music', '配乐'), ('other', '其他')):
+        group = [a for a in own if purpose(a) == key]
+        if not group:
+            continue
+        lines += ['', f'## {title}']
+        if key == 'edit':
+            lines.append('剪辑顺序：' + ('按下面的顺序' if fixed else '由你决定'))
+        for index, a in enumerate(group, 1):
+            duration = (a.get('analysis') or {}).get('duration') or a.get('duration')
+            kind = TYPE_NAMES.get(asset_type(a), '') + (f' · {_length(duration)}' if duration and asset_type(a) != 'Image' else '')
+            label = f"用途：{a['purpose_label']}。" if key == 'other' and a.get('purpose_label') else ''
+            note = (a.get('note') or '').strip()
+            lead = f'{index}.' if key == 'edit' and fixed else '-'
+            lines.append(f"{lead} {names[a['id']]}（{kind}）" + (f' {label}{note}' if label or note else ''))
+    return '\n'.join(lines) + '\n'
+
+
+def refresh_materials(project):
+    """Rewrite 素材.md from the material list. The caller holds jobs.LOCK and saves the project."""
+    text = render_materials(project)
+    if text != read(project['id'], 'materials'):
+        path(project['id'], 'materials').write_text(text, encoding='utf-8')
+        meta(project)['materials'] = {'origin': 'materials', 'updated_at': store.now()}
 
 
 def _list(lines, label, items):

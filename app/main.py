@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -405,6 +406,14 @@ async def upload_public(file: UploadFile = File(...), media_type: str | None = Q
     return await upload_asset(file, None, media_type)
 
 
+def length(path):
+    """Seconds of an uploaded clip for 素材.md; unknown when FFprobe is missing or the file is odd."""
+    try:
+        return round(media.probe(path, threading.Event())['duration'], 2)
+    except Exception:
+        return None
+
+
 async def upload_asset(file, project_id=None, media_type=None, kind=None):
     if project_id:
         store.get('project', project_id)
@@ -439,12 +448,14 @@ async def upload_asset(file, project_id=None, media_type=None, kind=None):
             item = store.put('asset', {'id': asset_id, 'name': Path(file.filename).name, 'path': relative, 'kind': kind,
                                       'type': media_type, 'scope': 'project' if project_id else 'public',
                                       'project_id': project_id, 'storage_project_id': project_id,
-                                      'sha256': digest.hexdigest(), 'size': total, 'protected': [], 'provenance': ''}, project_id)
+                                      'sha256': digest.hexdigest(), 'size': total, 'protected': [], 'provenance': '',
+                                      'duration': length(path) if media_type != 'Image' else None}, project_id)
             if project_id:
                 p = store.get('project', project_id)
                 p['status'] = '待制作' if p.get('workspace', {}).get('intent') in ('assets', 'video') else '素材已保存'
                 if p['adopted'].get('edit'):
                     p['stale_stages'] = sorted(set(p['stale_stages']) | {'edit'})
+                docs.refresh_materials(p)
                 store.put('project', p)
             return item
     except Exception:
