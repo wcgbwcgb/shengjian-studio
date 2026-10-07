@@ -11,6 +11,8 @@
 3. 调研与文案可以使用本机 Claude Code 的订阅登录，也可以在「调研与文案服务」切换回 API；直接视频制作使用同一本机 CLI。
 4. 打开 http://127.0.0.1:8765。更新后重启服务。默认仅监听本机，不支持同时启动多个服务进程。
 
+Mac：双击 `安装.command`（如被系统拦截：打开「终端」，输入 `bash `，把 `安装.command` 拖进窗口后回车）。它会安装 Homebrew、Python、FFmpeg、Node.js、Claude Code 和依赖，引导登录 Claude，然后打开工作台；以后双击 `启动工作台.command`。需要管理员账户和自己的 Claude 订阅。打包给别人：`git archive --format=zip --prefix=声间/ -o 声间-mac.zip HEAD`。
+
 开发者启动：
 
 ```powershell

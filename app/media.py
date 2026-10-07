@@ -37,7 +37,9 @@ def environment():
 
 def font_path():
     candidates = [os.getenv('MEDIA_FONT_PATH', ''), 'C:/Windows/Fonts/msyh.ttc',
-                  'C:/Windows/Fonts/simhei.ttf', '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc']
+                  'C:/Windows/Fonts/simhei.ttf', '/System/Library/Fonts/PingFang.ttc',
+                  '/System/Library/Fonts/Hiragino Sans GB.ttc', '/System/Library/Fonts/STHeiti Medium.ttc',
+                  '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc']
     return next((p for p in candidates if p and Path(p).is_file()), None)
 
 
