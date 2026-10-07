@@ -213,7 +213,6 @@ def from_inspiration(body: dict):
     item = lookup(body.get('id'))
     if not item:
         raise ValueError('灵感不存在')
-    clarify = bool(body.get('clarify', True))
     if item.get('kind') == 'research':
         # Favourites saved before batches existed keep their original research.
         try:
@@ -222,4 +221,5 @@ def from_inspiration(body: dict):
         except ValueError:
             pass
     idea = item['title'] + ('：' + item['description'] if item.get('description') else '')
-    return create(Creation(idea=idea, intent='research', clarify=clarify))
+    # The idea lands in 我的idea; the creator decides what to run first.
+    return create(Creation(idea=idea, intent='idea', start=False))

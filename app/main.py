@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import assets as asset_store, catalog, claude_cli, config, jobs, media, models, store, text_cli, timeline
+from . import assets as asset_store, catalog, claude_cli, config, docs, jobs, media, models, store, text_cli, timeline
 
 
 @asynccontextmanager
@@ -212,9 +212,10 @@ def create_project(body: ProjectInput):
 
 @app.get('/api/projects/{project_id}')
 def detail(project_id: str):
-    return {'project': store.get('project', project_id), **{k + 's': store.listing(k, project_id) for k in
+    project = store.get('project', project_id)
+    return {'project': project, **{k + 's': store.listing(k, project_id) for k in
            ('version', 'asset', 'task', 'source', 'message', 'publication')},
-           'usage': store.listing('usage', project_id)}
+           'usage': store.listing('usage', project_id), 'docs': docs.status(project)}
 
 
 @app.patch('/api/projects/{project_id}')
@@ -270,10 +271,12 @@ def retry(task_id: str):
     if old['status'] not in ('failed', 'interrupted', 'cancelled'):
         raise ValueError('该任务不需要恢复')
     with jobs.LOCK:
-        return jobs.submit(old['project_id'], old['kind'], old['payload'], frozen=old)
+        # A run sent with an approved text is retried with that same text.
+        return jobs.submit(old['project_id'], old['kind'], old['payload'], frozen=old,
+                           prompt_override=claude_cli.prompt_override(old))
 
 
-RESENDABLE = ('research', 'script', 'angles', 'chat', 'cli_video')
+RESENDABLE = ('research', 'script', 'angles', 'chat', 'polish', 'cli_video')
 
 
 @app.get('/api/tasks/{task_id}/sent')
@@ -284,7 +287,7 @@ def sent(task_id: str):
         raise ValueError('这次运行没有原文记录：它运行在加上这个功能之前，或者还没有开始发送。')
     record = json.loads(path.read_text(encoding='utf-8'))
     return record | {'task_id': task_id, 'kind': task['kind'], 'status': task['status'],
-                     'model': task.get('model_config', {}).get('model'), 'edited': bool(task.get('prompt_override')),
+                     'model': task.get('model_config', {}).get('model'), 'edited': bool(task.get('edited_from')),
                      'resendable': task['kind'] in RESENDABLE and record['engine'] == 'claude_cli' and bool(task.get('project_id'))}
 
 
@@ -305,7 +308,8 @@ def resend(task_id: str, body: ResendInput):
     if not body.prompt.strip():
         raise ValueError('原文不能为空')
     with jobs.LOCK:
-        return jobs.submit(old['project_id'], old['kind'], old['payload'], frozen=old, prompt_override=body.prompt)
+        return jobs.submit(old['project_id'], old['kind'], old['payload'], frozen=old, prompt_override=body.prompt,
+                           edited_from=old['id'])
 
 
 def owned_version(project_id, version_id):

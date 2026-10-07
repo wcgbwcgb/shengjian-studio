@@ -96,15 +96,17 @@ class Evidence:
 
 
 RECORDS = {'research': 'topics', 'script': 'paragraphs', 'angles': 'angles', 'inspire': 'ideas'}
-CHAT_ACTIONS = ['none', 'research', 'angles', 'custom_angle', 'revise_script']
+CHAT_ACTIONS = ['none', 'write_idea', 'research', 'write_script', 'angles', 'revise_script']
 
 
 def schema(mode):
     if mode == 'chat':
         text = {'type': 'string'}
         return {'type': 'object', 'required': ['reply'], 'additionalProperties': True, 'properties': {
-            'reply': text, 'question': text, 'options': {'type': 'array', 'items': text}, 'card': {'type': 'object'},
+            'reply': text, 'question': text, 'options': {'type': 'array', 'items': text},
             'action': {'type': 'string', 'enum': CHAT_ACTIONS}, 'action_input': text, 'action_label': text}}
+    if mode == 'idea':
+        return {'type': 'object', 'required': ['idea'], 'additionalProperties': True, 'properties': {'idea': {'type': 'string'}}}
     key = RECORDS[mode]
     # Claude tool schemas require an object root and reject root combinators.
     # The application validates which optional result/message was returned.
@@ -121,6 +123,10 @@ def validate_result(result, mode):
         if not isinstance(result.get('reply'), str) or not result['reply'].strip():
             raise ValueError('Claude 没有给出有效回复，请重试')
         return result
+    if mode == 'idea':
+        if not isinstance(result.get('idea'), str) or not result['idea'].strip():
+            raise ValueError('Claude 没有给出整理后的想法，请重试')
+        return result
     from .jobs import normalize_result
     result = normalize_result(result, mode)
     key = RECORDS[mode]
@@ -134,7 +140,7 @@ def validate_result(result, mode):
 
 def call(task, mode, context, event, report):
     from . import models
-    if mode not in RECORDS and mode != 'chat':
+    if mode not in RECORDS and mode not in ('chat', 'idea'):
         raise ValueError('订阅文字服务仅支持调研、灵感、对话和文案')
     settings = task['cli_config']
     command = claude_cli.cli_command(settings)
@@ -164,7 +170,7 @@ def call(task, mode, context, event, report):
     (root / 'context.json').write_text(json.dumps(context, ensure_ascii=False, default=str), encoding='utf-8')
     evidence = Evidence()
     report({'research': '正在使用 Claude 订阅调研', 'inspire': '正在构思灵感', 'chat': '正在思考',
-            'angles': '正在构思新方向'}.get(mode, '正在使用 Claude 订阅写稿'))
+            'angles': '正在构思新方向', 'idea': '正在整理你的想法'}.get(mode, '正在使用 Claude 订阅写稿'))
     response = claude_cli.execute_process(task, args, root, prompt, event, report, on_event=evidence.collect)
     if event.is_set():
         raise media.Cancelled()

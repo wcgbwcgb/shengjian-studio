@@ -10,7 +10,8 @@ if sys.argv[1:3] == ['auth', 'status']:
     print(json.dumps({'loggedIn': True, 'authMethod': os.getenv('TEXT_CLI_AUTH', 'claude.ai')}))
     sys.exit(0)
 prompt = sys.stdin.read()
-context = json.loads(prompt.split('任务上下文：\n', 1)[1])
+# Runs the creator checked before sending carry only that text, without a context block.
+context = json.loads(prompt.split('任务上下文：\n', 1)[1]) if '任务上下文：\n' in prompt else {}
 output_schema = json.loads(sys.argv[sys.argv.index('--json-schema') + 1])
 if output_schema.get('type') != 'object':
     print(json.dumps({'type': 'result', 'subtype': 'error', 'is_error': True,
@@ -20,8 +21,8 @@ if any(key in output_schema for key in ('oneOf', 'allOf', 'anyOf')):
     print(json.dumps({'type': 'result', 'subtype': 'error', 'is_error': True,
                       'result': 'API Error: 400 tools.0.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level'}), flush=True)
     sys.exit(1)
-field = next(key for key in ('topics', 'paragraphs', 'angles', 'ideas', 'reply') if key in output_schema['properties'])
-mode = {'topics': 'research', 'paragraphs': 'script', 'angles': 'angles', 'ideas': 'inspire', 'reply': 'chat'}[field]
+field = next(key for key in ('topics', 'paragraphs', 'angles', 'ideas', 'reply', 'idea') if key in output_schema['properties'])
+mode = {'topics': 'research', 'paragraphs': 'script', 'angles': 'angles', 'ideas': 'inspire', 'reply': 'chat', 'idea': 'idea'}[field]
 Path('received.json').write_text(json.dumps({'argv': sys.argv, 'prompt': prompt, 'has_api_key': bool(os.getenv('ANTHROPIC_API_KEY')),
                                           'context': context}, ensure_ascii=False), encoding='utf-8')
 session = str(uuid.uuid4())
@@ -44,11 +45,13 @@ elif mode == 'angles':
     result = {'angles': [{'id': str(i), 'title': f'新角度 {i}'} for i in range(3)]}
 elif mode == 'inspire':
     result = {'ideas': [{'title': f'订阅灵感 {i}', 'description': '隔离测试', 'tags': ['测试']} for i in range(4)]}
+elif mode == 'idea':
+    result = {'idea': '# 我的想法\n订阅润色后的想法'}
 elif mode == 'chat':
     asked = any(m['role'] == 'assistant' for m in context.get('conversation', []))
-    result = ({'reply': '明白了。', 'question': '', 'options': [], 'card': {'tone': '轻松'}, 'action': 'research',
-               'action_input': '订阅调研重点', 'action_label': '开始研究'} if asked else
-              {'reply': '先确认一下。', 'question': '给谁看？', 'options': ['学生', '上班族'], 'card': {'audience': '学生'},
+    result = ({'reply': '明白了。', 'question': '', 'options': [], 'action': 'write_idea',
+               'action_input': '# 我的想法\n讲给上班族', 'action_label': '写入 我的idea.md'} if asked else
+              {'reply': '先确认一下。', 'question': '给谁看？', 'options': ['学生', '上班族'],
                'action': 'none', 'action_input': '', 'action_label': ''})
 else:
     result = context.get('current') or {'angle': '订阅文案', 'paragraphs': [

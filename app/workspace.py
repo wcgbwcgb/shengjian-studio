@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from . import assets as asset_store, claude_cli, config, jobs, media, store, text_cli, timeline
+from . import assets as asset_store, claude_cli, config, docs, jobs, media, store, text_cli, timeline
 
 router = APIRouter(prefix='/api')
 ACTIVE = ('queued', 'running', 'cancelling')
@@ -45,32 +45,12 @@ class Creation(BaseModel):
     intent: str = 'idea'
     duration: int = Field(default=60, ge=10, le=3600)
     aspect: str = '9:16'
-    clarify: bool = False
     start: bool = True  # False: only create the project; the creator starts work inside it.
 
 
-CARD_FIELDS = {'audience': '给谁看', 'goal': '想让观众得到什么', 'core_message': '核心观点', 'tone': '语气风格',
-               'format': '形式与时长', 'must_include': '必须包含', 'avoid': '要避免', 'notes': '其他'}
-CHAT_ACTIONS = {'clarify': ('none', 'research'), 'angles': ('none', 'research', 'angles', 'custom_angle'),
-                'script': ('none', 'research', 'angles', 'custom_angle', 'revise_script')}
-
-
-def card_text(project):
-    card = workspace(project).get('card') or {}
-    lines = [f'{label}：{card[key]}' for key, label in CARD_FIELDS.items() if card.get(key)]
-    return '\n已与创作者确认的需求（优先遵循）：\n' + '\n'.join(lines) if lines else ''
-
-
-def research_prompt(project):
-    w = workspace(project)
-    return (f"创作者想制作：{w['idea']}\n入口：{w.get('intent', 'idea')}。"
-            '围绕这个意图研究适合短视频的内容。具体题目聚焦一个选题；发现选题时给三个候选。'
-            '每个选题给三个具体可拍的角度，包括受众、开场、差异化。'
-            '提炼事实、不同观点、观众反应和内容空缺。只列实际可取得的来源，未取得的数据保持空缺。' + card_text(project))
-
-
-def submit_research(project):
-    return jobs.submit(project['id'], 'research', {'prompt': research_prompt(project), 'workspace': True})
+CHAT_ACTIONS = {'clarify': ('none', 'write_idea', 'research', 'write_script'),
+                'angles': ('none', 'write_idea', 'research', 'write_script', 'angles'),
+                'script': ('none', 'write_idea', 'research', 'write_script', 'angles', 'revise_script')}
 
 
 @router.post('/creations')
@@ -92,7 +72,7 @@ def create(body: Creation):
         'requirements': {'duration': duration, 'aspect': stated['aspect']},
         'defaults': store.settings(), 'status': '构思中', 'adopted': {}, 'stale_stages': [],
         'stage_settings': {}, 'stage_prompts': {},
-        'workspace': {'idea': idea, 'intent': body.intent},
+        'workspace': {'idea': idea, 'intent': body.intent, 'brainstorm': body.idea.strip()},
     })
     if body.intent == 'assets':
         project['status'] = '待添加素材'
@@ -109,13 +89,10 @@ def create(body: Creation):
     if body.intent == 'video':
         task = jobs.submit(project['id'], 'cli_video', {'prompt': idea}) if claude_cli.cli_command() else None
         return {'project': project, 'task': task, 'needs_cli': not bool(task)}
-    if body.clarify and body.intent in ('idea', 'research', 'reference', 'discover') and text_cli.available():
-        # Talk the idea through first; research starts once the requirements are clear.
-        project['status'] = '明确需求中'
-        project = store.put('project', project)
-        task = jobs.submit(project['id'], 'chat', {'prompt': idea, 'workspace': True})
-        return {'project': project, 'task': task, 'needs_connection': False, 'clarify': True}
-    task = submit_research(project) if text_cli.available() and body.intent != 'assets' else None
+    task = None
+    if text_cli.available() and body.intent != 'assets':
+        request, refs = docs.default_request(project, 'research'), docs.default_refs(project, 'research')
+        task = submit_run(project, 'research', request, refs, docs.compose(project, 'research', request, refs))
     return {'project': project, 'task': task, 'needs_connection': not text_cli.available()}
 
 
@@ -135,42 +112,6 @@ def opportunities():
             items.append({'topic': topic, 'project_id': version['project_id'], 'version_id': version['id'],
                           'collected_at': version['created_at'], 'sources': version['result'].get('sources', [])})
     return items
-
-
-class IdeaUpdate(BaseModel):
-    idea: str = Field(min_length=1, max_length=12000)
-    model: str | None = None
-    prompt: str = ''
-    settings: dict = Field(default_factory=dict)
-
-
-@router.post('/projects/{project_id}/workspace/research')
-def research(project_id: str, body: IdeaUpdate):
-    with jobs.LOCK:
-        idle(project_id)
-        p = store.get('project', project_id)
-        if not body.idea.strip():
-            raise ValueError('请写下想研究的内容')
-        workspace(p)['idea'] = body.idea.strip()
-        return start_research(p, body.prompt, body.model, body.settings)
-
-
-def start_research(p, extra='', model=None, settings=None):
-    if p.get('adopted'):
-        invalidate(p, 'research', 'script', 'scenes', 'edit')
-    store.put('project', p)
-    if not text_cli.available():
-        raise ValueError('想法已保存。请在设置中连接 Claude 订阅或 API 服务后开始调研。')
-    return jobs.submit(p['id'], 'research', {'prompt': research_prompt(p) + ('\n' + extra if extra else ''),
-                       'workspace': True, 'model': model, 'settings': settings or {}})
-
-
-class AngleChoice(BaseModel):
-    version_id: str
-    topic_id: str
-    angle_id: str
-    model: str | None = None
-    note: str = Field(default='', max_length=2000)
 
 
 class ResearchStart(BaseModel):
@@ -199,6 +140,7 @@ def create_from_research(body: ResearchStart):
                   'copied_from': original['id'], 'prompt': '从已有研究开始新视频',
                   'source_ids': [s['id'] for s in sources], 'model_config': {'model': 'local'}, 'stale': False}, p['id'])
     workspace(p)['research_version'] = v['id']
+    docs.sync(p, 'research', v)
     store.put('project', p)
     return {'project': p, 'version': v}
 
@@ -215,22 +157,7 @@ def angles_for(topic, project=None):
     return angles
 
 
-@router.post('/projects/{project_id}/workspace/angle')
-def choose_angle(project_id: str, body: AngleChoice):
-    with jobs.LOCK:
-        idle(project_id)
-        research = owned(project_id, body.version_id, 'research')
-        topic = next((t for t in research['result'].get('topics', []) if t['id'] == body.topic_id), None)
-        if not topic:
-            raise ValueError('请选择当前调研中的选题')
-        p = store.get('project', project_id)
-        angle = next((a for a in angles_for(topic, p) if a['id'] == body.angle_id), None)
-        if not angle:
-            raise ValueError('请选择当前选题中的角度')
-        return start_script(p, angle, research, topic, body.note, body.model)
-
-
-def start_script(p, angle, research=None, topic=None, note='', model=None):
+def start_script(p, request, prompt, angle=None, research=None, topic=None, model=None):
     if research:
         p['adopted']['research'] = research['id']
     if topic:
@@ -239,21 +166,19 @@ def start_script(p, angle, research=None, topic=None, note='', model=None):
             p['name'] = str(topic['title'])[:80]
     p['status'] = '正在构思脚本'
     w = workspace(p)
-    w['angle'] = angle
+    if angle:
+        w['angle'] = angle
+    else:
+        w.pop('angle', None)
     if research:
         w['research_version'] = research['id']
     w.pop('script_version', None)
     invalidate(p, 'script', 'scenes', 'edit')
     clear_stale(p, 'research')
     store.put('project', p)
-    return jobs.submit(p['id'], 'script', {
-        'model': model,
-        'workspace': True, 'fresh_script': True, 'angle': angle['title'],
-        'prompt': f"按用户选定的角度写完整短视频：{angle}。" + (f"用户对这个方向的补充要求：{note}。" if note.strip() else '')
-                  + '直接提供开场、推进、关键转折和收尾。'
-                  '重要事实在所属段落 source_urls 中引用调研原始来源；听感与观点分开。'
-                  '为每段写具体画面 cue 和可搜索的 visual_keywords。不要要求用户再写提示词。',
-    })
+    return jobs.submit(p['id'], 'script', {'model': model, 'workspace': True, 'fresh_script': True,
+                                           'angle': angle['title'] if angle else '', 'prompt': request},
+                       prompt_override=prompt)
 
 
 def current_research(p):
@@ -310,7 +235,8 @@ def execute_chat(task, event, report):
     topic = current_topic(p, research)
     w = workspace(p)
     effective = task['effective']
-    context = {'stage': stage, 'idea': w.get('idea', p['name']), 'card': w.get('card', {}),
+    context = {'stage': stage, 'brainstorm': w.get('brainstorm') or w.get('idea', p['name']),
+               'my_idea': docs.read(project_id, 'idea'),
                'defaults': {k: effective.get(k) for k in ('audience', 'style', 'platform', 'duration', 'aspect')},
                'research': topic_digest(topic, p) if topic else None, 'chosen_angle': w.get('angle'),
                'script': [{'speaker': x.get('speaker'), 'text': x.get('text')} for x in script['result']['paragraphs']] if script else None,
@@ -324,40 +250,15 @@ def execute_chat(task, event, report):
     options = [str(o).strip()[:200] for o in result.get('options') or [] if str(o).strip()][:4]
     with jobs.LOCK:
         current = store.get('project', project_id)
-        card = workspace(current).setdefault('card', {})
-        for key, value in (result.get('card') or {}).items():
-            if key in CARD_FIELDS and isinstance(value, str) and value.strip():
-                card[key] = value.strip()[:1000]
         if current.get('status') == '构思中':
             current['status'] = '明确需求中'
         store.put('project', current)
+        limit = 12000 if action == 'write_idea' else 2000
         message = store.put('message', {
             'stage': 'chat', 'role': 'assistant', 'text': reply[:4000], 'question': str(result.get('question') or '').strip()[:1000],
-            'options': options, 'action': action, 'action_input': str(result.get('action_input') or '').strip()[:2000],
+            'options': options, 'action': action, 'action_input': str(result.get('action_input') or '').strip()[:limit],
             'action_label': str(result.get('action_label') or '').strip()[:40], 'task_id': task['id']}, project_id)
     return {'message_id': message['id']}
-
-
-class CardUpdate(BaseModel):
-    card: dict[str, str]
-
-
-@router.patch('/projects/{project_id}/workspace/card')
-def update_card(project_id: str, body: CardUpdate):
-    with jobs.LOCK:
-        p = store.get('project', project_id)
-        card = workspace(p).setdefault('card', {})
-        for key, value in body.card.items():
-            if key not in CARD_FIELDS:
-                raise ValueError('需求卡字段不支持')
-            if len(value) > 1000:
-                raise ValueError('需求卡内容过长')
-            if value.strip():
-                card[key] = value.strip()
-            else:
-                card.pop(key, None)
-        store.put('project', p)
-        return card
 
 
 class ChatAction(BaseModel):
@@ -371,35 +272,33 @@ def chat_action(project_id: str, body: ChatAction):
         message = store.get('message', body.message_id)
         if message.get('project_id') != project_id or message.get('stage') != 'chat' or message.get('action') in (None, 'none'):
             raise ValueError('这条消息没有可执行的建议')
-        if message.get('action_task_id'):
+        if message.get('action_task_id') or message.get('action_done'):
             raise ValueError('这个建议已经执行过了')
         p, text = store.get('project', project_id), message.get('action_input', '')
         research = current_research(p)
-        if message['action'] == 'research':
-            task = start_research(p, '研究重点：' + text if text else '')
-        elif message['action'] == 'angles':
+        if message['action'] == 'write_idea':
+            if not text.strip():
+                raise ValueError('这条建议没有可写入的内容')
+            docs.write(p, 'idea', text.strip() + '\n', 'chat')
+            store.put('project', p)
+            message['action_done'] = True
+            store.put('message', message, project_id)
+            return {'doc': 'idea'}
+        if message['action'] in ('research', 'write_script'):
+            # These start from a text the creator checks first: see /workspace/compose and /workspace/run.
+            raise ValueError('请在发送前确认原文')
+        if message['action'] == 'angles':
             if not research or not current_topic(p, research):
-                raise ValueError('还没有研究结果，请先开始研究')
+                raise ValueError('还没有调研结果，请先开始调研')
             task = submit_angles(p, research, current_topic(p, research), text)
-        elif message['action'] == 'custom_angle':
-            title, _, detail = text.partition('\n')
-            topic = current_topic(p, research)
-            task = start_script(p, remember_angle(p, topic, title or text, detail), research, topic)
         else:
             script = current_script(p)
             if not script:
-                raise ValueError('还没有脚本，请先选择方向')
+                raise ValueError('还没有文案，请先写文案')
             task = jobs.submit(project_id, 'script', {'prompt': text, 'base_version_id': script['id'], 'workspace': True})
         message['action_task_id'] = task['id']
         store.put('message', message, project_id)
         return task
-
-
-def remember_angle(p, topic, title, detail=''):
-    angle = {'id': 'custom-' + store.uid()[:10], 'title': title.strip()[:200], 'reason': detail.strip()[:2000], 'custom': True}
-    if topic:
-        workspace(p).setdefault('extra_angles', {}).setdefault(topic['id'], []).append(angle)
-    return angle
 
 
 def submit_angles(p, research, topic, feedback='', model=None):
@@ -440,7 +339,7 @@ def execute_angles(task, event, report):
         raise ValueError('选题已不存在，请重新研究')
     p = store.get('project', project_id)
     context = {'topic': topic_digest(topic, p), 'existing_angles': [{'title': a.get('title'), 'hook': a.get('hook')} for a in angles_for(topic, p)],
-               'feedback': payload.get('feedback', ''), 'card': workspace(p).get('card', {}), 'idea': workspace(p).get('idea'),
+               'feedback': payload.get('feedback', ''), 'my_idea': docs.read(project_id, 'idea'), 'idea': workspace(p).get('idea'),
                'conversation': chat_history(project_id, 12), 'count': 3, 'effective': task['effective']}
     result, _, _ = models.call(task, 'angles', context, event, report)
     angles = []
@@ -460,25 +359,157 @@ def execute_angles(task, event, report):
     return {'angle_ids': [a['id'] for a in angles]}
 
 
-class CustomAngle(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    detail: str = Field(default='', max_length=2000)
-    version_id: str | None = None
-    topic_id: str | None = None
+class Brainstorm(BaseModel):
+    text: str = Field(default='', max_length=20000)
+
+
+@router.put('/projects/{project_id}/workspace/brainstorm')
+def save_brainstorm(project_id: str, body: Brainstorm):
+    with jobs.LOCK:
+        p = store.get('project', project_id)
+        workspace(p)['brainstorm'] = body.text
+        store.put('project', p)
+        return {'brainstorm': body.text}
+
+
+class DocText(BaseModel):
+    text: str = Field(default='', max_length=200000)
+    origin: str = 'manual'
+
+
+def doc_key(key):
+    if key not in docs.NAMES:
+        raise ValueError('文件不存在')
+    return key
+
+
+@router.put('/projects/{project_id}/workspace/docs/{key}')
+def save_doc(project_id: str, key: str, body: DocText):
+    """The creator's own text. 原封不动 saves the brainstorm as-is."""
+    if body.origin not in ('manual', 'brainstorm') or (body.origin == 'brainstorm' and key != 'idea'):
+        raise ValueError('来源不支持')
+    with jobs.LOCK:
+        p = store.get('project', project_id)
+        docs.write(p, doc_key(key), body.text, body.origin)
+        docs.meta(p)[key].pop('pending', None)
+        store.put('project', p)
+        return docs.status(p)[key]
+
+
+@router.post('/projects/{project_id}/workspace/docs/{key}/undo')
+def undo_doc(project_id: str, key: str):
+    with jobs.LOCK:
+        p = store.get('project', project_id)
+        docs.undo(p, doc_key(key))
+        store.put('project', p)
+        return docs.status(p)[key]
+
+
+@router.post('/projects/{project_id}/workspace/docs/{key}/sync')
+def sync_doc(project_id: str, key: str):
+    """Overwrite a hand-edited 调研.md / 文案.md with the newest result."""
+    with jobs.LOCK:
+        p = store.get('project', project_id)
+        version = current_research(p) if doc_key(key) == 'research' else current_script(p) if key == 'script' else None
+        if not version:
+            raise ValueError('还没有可以写入的结果')
+        docs.meta(p)[key] = {k: v for k, v in docs.meta(p).get(key, {}).items() if k != 'pending'} | {'origin': 'sync'}
+        docs.sync(p, key, version)
+        store.put('project', p)
+        return docs.status(p)[key]
+
+
+class Compose(BaseModel):
+    module: str
+    request: str | None = Field(default=None, max_length=20000)  # None: the module's default request
+    refs: list[str] | None = None  # None: the module's default references
+
+
+def compose_parts(p, body):
+    if body.module not in docs.MODULES:
+        raise ValueError('不支持的模块')
+    request = docs.default_request(p, body.module) if body.request is None else body.request
+    refs = docs.default_refs(p, body.module) if body.refs is None else [doc_key(k) for k in body.refs]
+    return request, refs
+
+
+@router.post('/projects/{project_id}/workspace/compose')
+def compose(project_id: str, body: Compose):
+    """The exact text a run would send, for the creator to check and edit first."""
+    p = store.get('project', project_id)
+    request, refs = compose_parts(p, body)
+    return {'module': body.module, 'request': request, 'refs': refs,
+            'prompt': docs.compose(p, body.module, request, refs, workspace(p).get('brainstorm', ''))}
+
+
+class AngleRef(BaseModel):
+    version_id: str
+    topic_id: str
+    angle_id: str
+
+
+class Run(Compose):
+    prompt: str = Field(min_length=1, max_length=1_000_000)  # sent as-is
     model: str | None = None
+    base_version_id: str | None = None  # video: continue from this version
+    angle: AngleRef | None = None  # script: written from a research angle
+    message_id: str | None = None  # the conversation suggestion this run carries out
 
 
-@router.post('/projects/{project_id}/workspace/angle/custom')
-def custom_angle(project_id: str, body: CustomAngle):
+def submit_run(p, module, request, refs, prompt, model=None, angle=None, base_version_id=None):
+    if module == 'video':
+        if not claude_cli.cli_command():
+            raise ValueError('未找到 Claude Code。请在设置中配置并检测本机 CLI。')
+        return jobs.submit(p['id'], 'cli_video', {'prompt': prompt, 'base_version_id': base_version_id, 'refs': refs})
+    if not text_cli.available():
+        raise ValueError('请先在设置中连接 Claude 订阅或 API 服务')
+    if module == 'polish':
+        return jobs.submit(p['id'], 'polish', {'prompt': request, 'model': model}, prompt_override=prompt)
+    if module == 'research':
+        if p.get('adopted'):
+            invalidate(p, 'research', 'script', 'scenes', 'edit')
+        store.put('project', p)
+        return jobs.submit(p['id'], 'research', {'prompt': request, 'refs': refs, 'workspace': True, 'model': model},
+                           prompt_override=prompt)
+    research = topic = chosen = None
+    if angle:
+        research = owned(p['id'], angle.version_id, 'research')
+        topic = next((t for t in research['result'].get('topics', []) if t['id'] == angle.topic_id), None)
+        chosen = next((a for a in angles_for(topic, p) if a['id'] == angle.angle_id), None) if topic else None
+        if not chosen:
+            raise ValueError('这个角度已经不存在，请重新选择')
+    return start_script(p, request, prompt, chosen, research, topic, model)
+
+
+@router.post('/projects/{project_id}/workspace/run')
+def run(project_id: str, body: Run):
     with jobs.LOCK:
         idle(project_id)
         p = store.get('project', project_id)
-        research = owned(project_id, body.version_id, 'research') if body.version_id else current_research(p)
-        topic = (next((t for t in research['result'].get('topics', []) if t['id'] == body.topic_id), None)
-                 if research and body.topic_id else current_topic(p, research))
-        if not body.title.strip():
-            raise ValueError('请写下你的方向')
-        return start_script(p, remember_angle(p, topic, body.title, body.detail), research, topic, model=body.model)
+        request, refs = compose_parts(p, body)
+        if not body.prompt.strip():
+            raise ValueError('发送的原文不能为空')
+        message = store.get('message', body.message_id) if body.message_id else None
+        if message and (message.get('project_id') != project_id or message.get('stage') != 'chat'):
+            raise ValueError('对话建议不属于当前项目')
+        task = submit_run(p, body.module, request, refs, body.prompt, body.model, body.angle, body.base_version_id)
+        if message:
+            message['action_task_id'] = task['id']
+            store.put('message', message, project_id)
+        return task
+
+
+def execute_polish(task, event, report):
+    from . import models
+    result, _, _ = models.call(task, 'idea', {'effective': task['effective']}, event, report)
+    text = str(result.get('idea') or '').strip()
+    if not text:
+        raise ValueError('Claude 没有给出整理后的想法，请重试')
+    with jobs.LOCK:
+        p = store.get('project', task['project_id'])
+        docs.write(p, 'idea', text + '\n', 'polish')
+        store.put('project', p)
+    return {'doc': 'idea'}
 
 
 def ground_script(result, sources, previous=None):
@@ -578,6 +609,7 @@ def save_script(project_id: str, body: ScriptSave):
                              'prompt': '直接编辑', 'effective': parent.get('effective', {}),
                              'model_config': {'model': 'manual'}, 'stale': False}, project_id)
         w['script_version'] = version['id']
+        docs.sync(p, 'script', version)
         # Once scenes exist, direct editing synchronizes them without losing earlier cuts.
         if w.get('scene_version'):
             p['adopted']['script'] = version['id']
@@ -625,6 +657,7 @@ def restore_script(project_id: str, body: ScriptAccept):
                      'prompt': '从历史版本继续创作', 'stale': False}, project_id)
         workspace(p)['script_version'] = v['id']
         p['adopted']['script'] = v['id']
+        docs.sync(p, 'script', v)
         clear_stale(p, 'script')
         if workspace(p).get('scene_version'):
             save_scenes(p, v)
@@ -877,6 +910,7 @@ def completed_script(task, version):
             store.put('version', version, task['project_id'])
             return
         w['script_version'] = version['id']
+        docs.sync(p, 'script', version)
         clear_stale(p, 'script')
         invalidate(p, 'scenes', 'edit')
         p['status'] = '待确认脚本'

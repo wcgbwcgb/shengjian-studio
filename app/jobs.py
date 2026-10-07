@@ -3,7 +3,7 @@ import queue
 import threading
 import time
 
-from . import assets as asset_store, catalog, claude_cli, config, media, models, store, text_cli, timeline
+from . import assets as asset_store, catalog, claude_cli, config, docs, media, models, store, text_cli, timeline
 
 QUEUE = queue.Queue()
 EVENTS = {}
@@ -28,17 +28,17 @@ def close():
         THREAD.join(timeout=6)
 
 
-def submit(project_id, kind, payload, frozen=None, prompt_override=None):
+def submit(project_id, kind, payload, frozen=None, prompt_override=None, edited_from=None):
     with LOCK:
         project = store.get('project', project_id)
         if any(t['status'] in ('running', 'queued', 'cancelling') for t in store.listing('task', project_id)):
             raise ValueError('该项目已有任务执行中，请等待或取消后再修改')
         stage = 'edit' if kind in ('analyze', 'preview', 'final', 'local_edit', 'first_cut', 'cli_video') else ('script' if kind in ('script', 'angles') else kind)
         payload = dict(payload)
-        ai_task = kind in ('research', 'script', 'angles', 'edit', 'chat')
-        # Conversation turns use the writing model.
-        model_stage = 'script' if kind == 'chat' else stage
-        using_cli = kind in ('research', 'script', 'angles', 'chat') and (frozen['model_config'].get('engine') == 'claude_cli' if frozen else text_cli.enabled())
+        ai_task = kind in ('research', 'script', 'angles', 'edit', 'chat', 'polish')
+        # Conversation turns and polishing the idea use the writing model.
+        model_stage = 'script' if kind in ('chat', 'polish') else stage
+        using_cli = kind in ('research', 'script', 'angles', 'chat', 'polish') and (frozen['model_config'].get('engine') == 'claude_cli' if frozen else text_cli.enabled())
         selected_model = (frozen['model_config']['model'] if frozen else
                           text_cli.resolve(model_stage, payload.get('model')) if using_cli else catalog.resolve(model_stage, payload.get('model'))) if ai_task else None
         cli_config = None
@@ -99,13 +99,14 @@ def submit(project_id, kind, payload, frozen=None, prompt_override=None):
             task['retry_of'] = frozen['id']
             task = store.put('task', task, project_id)
         if prompt_override is not None:
-            # Written before the run is queued, so the worker always sees it.
+            # The exact text the creator approved. Written before the run is queued,
+            # so the worker always sees it.
             claude_cli.sent_path(task, 'override.txt').write_text(prompt_override, encoding='utf-8')
-            task.update(prompt_override=True, edited_from=frozen['id'] if frozen else None)
+            task.update(prompt_override=True, edited_from=edited_from)
             task = store.put('task', task, project_id)
         EVENTS[task['id']] = threading.Event()
-        # A re-sent run repeats an earlier request; it is not a new instruction for the project.
-        if prompt and prompt_override is None:
+        # A retried or re-sent run repeats an earlier request; it is not a new instruction for the project.
+        if prompt and not frozen:
             store.put('message', {'stage': stage, 'role': 'user', 'text': prompt, 'task_id': task['id'], 'effective': effective}, project_id)
             project.setdefault('stage_settings', {})[stage] = {k: v for k, v in effective.items() if k != 'prompt'}
             project.setdefault('stage_prompts', {})[stage] = prompt
@@ -161,6 +162,9 @@ def execute(task, event):
     if kind == 'chat':
         from .workspace import execute_chat
         return execute_chat(task, event, report)
+    if kind == 'polish':
+        from .workspace import execute_polish
+        return execute_polish(task, event, report)
     if kind == 'angles' and payload.get('workspace'):
         from .workspace import execute_angles
         return execute_angles(task, event, report)
@@ -208,7 +212,7 @@ def execute(task, event):
                'persistent_stage_instructions': task['snapshot'].get('stage_instruction_chain', {}).get(stage, []),
                'history': list(reversed(store.listing('message', project_id))) [-12:], 'target_ids': payload.get('target_ids', []),
                'selected_angle': payload.get('angle'),
-               'requirements_card': task['snapshot'].get('workspace', {}).get('card', {})}
+               'my_idea': docs.read(project_id, 'idea')}
     for upstream_stage, ident in task['upstream'].items():
         context[upstream_stage] = store.get('version', ident)['result']
     if kind == 'edit':
@@ -248,9 +252,10 @@ def execute(task, event):
     if kind == 'research' and payload.get('workspace'):
         with LOCK:
             project = store.get('project', project_id)
-            if project.get('status') in ('构思中', '待调研'):
+            if project.get('status') in ('构思中', '待调研', '明确需求中'):
                 project['status'] = '待选择角度'
-                store.put('project', project)
+            docs.sync(project, 'research', v)
+            store.put('project', project)
     if kind == 'script' and payload.get('workspace'):
         from .workspace import completed_script
         completed_script(task, v)

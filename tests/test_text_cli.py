@@ -90,6 +90,22 @@ class SubscriptionTextTests(unittest.TestCase):
         project = store.get('project', self.project['id'])
         self.assertEqual(project['stage_instruction_chain']['research'], ['订阅任务'])
 
+    def test_approved_text_is_what_claude_code_reads(self):
+        url = self.url + '/workspace'
+        self.client.put(url + '/brainstorm', json={'text': '会计转行做配音'})
+        composed = self.client.post(url + '/compose', json={'module': 'polish'}).json()
+        approved = composed['prompt'] + '\n再加一句：语气轻松。'
+        task = self.wait(self.client.post(url + '/run', json={'module': 'polish', 'prompt': approved}).json())
+        self.assertEqual(task['status'], 'completed', task.get('error'))
+        self.assertEqual(self.received(task)['prompt'], approved)
+        self.assertEqual(self.client.get(f"/api/tasks/{task['id']}/sent").json()['prompt'], approved)
+        self.assertFalse(self.client.get(f"/api/tasks/{task['id']}/sent").json()['edited'])
+        self.assertEqual(self.client.get(self.url).json()['docs']['idea']['text'], '# 我的想法\n订阅润色后的想法\n')
+        # A failed run is retried with the same approved text.
+        task['status'] = 'failed';store.put('task', task, self.project['id'])
+        retry = self.wait(self.client.post(f"/api/tasks/{task['id']}/retry", json={}).json())
+        self.assertEqual(self.received(retry)['prompt'], approved)
+
     def test_resend_is_refused_while_running_or_without_a_record(self):
         missing = self.client.get('/api/tasks/nope/sent')
         self.assertEqual(missing.status_code, 400)

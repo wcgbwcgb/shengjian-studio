@@ -22,7 +22,7 @@ SCHEMAS = {
 每个主题必须给恰好三个不同角度。根据题材检索 Web、小红书、抖音、B站、YouTube、X、Reddit 中实际可访问的公开内容。无法读取的平台如实说明；不可编造观众反应、其他创作者观点、热度指标或日期。
 搜索结果只有标题或摘录时用 search_only；确实 web fetch 读取才可写 fetched。不能伪造 verification。没有可读来源的选题写探索选题。''',
     'angles': '''基于 context.topic 中已有的研究，为创作者构思新的视频方向（角度）。不重新搜索，只使用 topic 里已有的事实与来源。
-新方向必须与 existing_angles 明显不同；优先满足 feedback 中创作者的不满与期望，以及 card 中已确认的需求。
+新方向必须与 existing_angles 明显不同；优先满足 feedback 中创作者的不满与期望，以及 my_idea（创作者的「我的idea.md」）中的想法。
 给出 count 个方向，返回 {"angles":[{"title":"核心观点","reason":"为什么有效","audience":"受众","hook":"具体开场台词","difference":"与已有方向的差异"}]}。''',
     'inspire': '''为创作者构思短视频选题灵感。direction 是想探索的方向（可为空），audience/style/platform 是账号默认。
 web 为 true 时，先联网搜索近期真实发生的事件、讨论和趋势，再提出与之相关的选题，每个选题在 sources 中列出实际取得的来源。
@@ -30,14 +30,15 @@ web 为 false 时不联网，凭创作经验快速发散，sources 留空，不�
 避开 avoid_titles 中已经出现或被否定的题目及相近方向；遵循 recent_feedback 中创作者对之前批次的不满；可参考 liked 中收藏题目体现的偏好。
 给出 count 个彼此差异明显的选题（题材、形式、情绪不要雷同），每个都具体、可拍，不要空泛的大题目。
 返回 {"ideas":[{"title":"具体选题，一句话","description":"讲什么、观众为什么想看，两句话内","hook":"一句可直接使用的开场","format":"适合的形式，如口播/对比实验/街访/图解","tags":["2-3 个标签"],"sources":[{"url":"...","title":"..."}]}]}''',
-    'chat': '''你在和创作者一起把一条短视频的需求想清楚，并在之后的研究、选方向和写脚本阶段继续协助。
-stage 表示进度：clarify 还没有研究；angles 已有研究，正在选方向；script 已有脚本。conversation 是之前的对话，message 是创作者刚说的话。
+    'chat': '''你在和创作者一起把一条短视频想清楚，并在之后的调研、文案阶段继续协助。
+brainstorm 是创作者随手记下的零散想法，my_idea 是当前的「我的idea.md」（可能为空）。stage 表示进度：clarify 还没有调研和文案；angles 已有调研；script 已有文案。conversation 是之前的对话，message 是创作者刚说的话。
 每次回复：reply 先简短回应（不超过三句）。还有不清楚的关键信息时，question 只问一个最重要的问题，并在 options 给 2-4 个具体、可直接点选的回答；创作者也可以自由输入。
-把已确认的信息写入 card，只填新增或改变的字段：audience 给谁看，goal 想让观众得到什么，core_message 核心观点，tone 语气风格，format 形式与时长，must_include 必须包含，avoid 要避免，notes 其他。
-clarify 阶段通常问 2-5 个问题。需求已经足够清楚、或创作者表示可以开始时，不再提问，提出 action。
-action 只能是：none；research（开始或重新研究，action_input 写研究重点）；angles（已有研究时按反馈重新构思方向，action_input 写不满与期望）；custom_angle（创作者描述了自己的方向，action_input 写方向标题与说明）；revise_script（已有脚本时修改，action_input 写具体修改要求）。
-clarify 阶段只能用 research 或 none；没有研究不能用 angles/custom_angle；没有脚本不能用 revise_script。action_label 写按钮上的简短文字。
-返回 {"reply":"...","question":"一个问题或空字符串","options":["..."],"card":{"audience":"..."},"action":"none","action_input":"","action_label":""}''',
+通常需要弄清：想讲什么、给谁看、想让观众得到什么、核心观点、语气风格、形式与时长、必须包含和要避免的内容。一般问 2-5 个问题。
+想法已经足够清楚、或创作者表示可以了时，不再提问，提出 action=write_idea：action_input 写完整的「我的idea.md」，Markdown，第一人称，保留创作者的原话和具体细节，不编造没说过的经历；还没确定的列在「待确定」。
+action 只能是：none；write_idea（见上）；research（开始调研，action_input 写调研重点）；write_script（按创作者描述的方向写文案，action_input 写方向和要求）；angles（已有调研时按反馈重新构思方向，action_input 写不满与期望）；revise_script（已有文案时修改，action_input 写具体修改要求）。
+没有调研不能用 angles；没有文案不能用 revise_script。action_label 写按钮上的简短文字。
+返回 {"reply":"...","question":"一个问题或空字符串","options":["..."],"action":"none","action_input":"","action_label":""}''',
+    'idea': '''返回 {"idea":"整理后的创作想法"}。idea 用 Markdown，第一人称，像创作者自己写下的创作想法。''',
     'script': '''返回 {"angle":"...","paragraphs":[{"id":"稳定标识","beat":"hook/context/evidence/turn/cta","speaker":"旁白/A/B/音乐","text":"台词","cue":"具体画面或音乐提示","visual_keywords":["素材关键词"],"claim_type":"fact/opinion","source_urls":["研究中实际来源URL，无依据留空"],"locked":false}],
 "facts":[{"claim":"...","source_url":"...","type":"事实/听感/观点"}],"shot_list":["..."],"music_needs":["待提供的音乐示例及位置"],"publishing":{"titles":["三个标题"],"cover":"...","description":"..."}}。
 直接给出开场钩子、结构、关键推进和自然收尾，时长遵循要求。重要事实的证据放在具体所属段落，不能只放全局 facts。不要把用户参考当作已验证事实。
@@ -161,16 +162,20 @@ def call(task, mode, context, cancel, phase):
     used = monthly_usage()['estimated_usd']
     if used >= float(settings['monthly_budget']):
         raise ValueError('本月已记录估算用量达到预算，停止启动新模型任务')
-    stage = {'angles': 'script', 'chat': 'script', 'inspire': 'research'}.get(mode, mode)
+    stage = {'angles': 'script', 'chat': 'script', 'idea': 'script', 'inspire': 'research'}.get(mode, mode)
     model = catalog.validate(task.get('model_config', {}).get('model') or catalog.resolve(stage, task.get('payload', {}).get('model')))
     prices = task.get('model_config', {}).get('pricing') or catalog.pricing(model)
+    from . import claude_cli
+    # A text the creator approved (or edited) before sending is the whole message.
+    approved = claude_cli.prompt_override(task)
     payload = {'model': model, 'max_tokens': int(settings['max_tokens']), 'system': SYSTEM + SCHEMAS[mode],
-               'messages': [{'role': 'user', 'content': json.dumps(context, ensure_ascii=False)}]}
+               'messages': [{'role': 'user', 'content': approved or json.dumps(context, ensure_ascii=False)}]}
+    if approved:
+        payload.pop('system')
     if (mode == 'research' and context.get('intent') != 'advice') or (mode == 'inspire' and context.get('web')):
         payload['tools'] = [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': int(context['effective']['search_limit']), 'allowed_callers': ['direct']},
                             {'type': 'web_fetch_20250910', 'name': 'web_fetch', 'max_uses': 10, 'allowed_callers': ['direct']}]
-    from . import claude_cli
-    claude_cli.record_sent(task, '【system】\n' + payload['system'] + '\n\n【user】\n' + payload['messages'][0]['content'],
+    claude_cli.record_sent(task, approved or '【system】\n' + payload['system'] + '\n\n【user】\n' + payload['messages'][0]['content'],
                            engine='api')
     phase('正在检索与读取资料' if payload.get('tools') else '正在思考' if mode == 'chat' else '正在生成')
     started = time.monotonic()

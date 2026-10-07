@@ -111,3 +111,48 @@ button:disabled,button[disabled]{opacity:.5;cursor:not-allowed}
 .continue-card .work-list{border:0;padding:0;background:none;border-radius:0}
 .continue-card .work-row:last-child{border-bottom:0}
 @media(max-width:900px){.projects-grid-home{grid-template-columns:minmax(0,1fr)}.new-project-card{position:static}}
+/* 我的idea: brainstorm, three ways to turn it into 我的idea.md */
+.idea-module .brainstorm{min-height:180px;font-size:13px;margin-top:2px}
+#brainstorm-status{margin:6px 0 18px}
+.idea-ways{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:22px}
+.idea-way{display:grid;gap:6px;text-align:left;padding:16px 16px 15px;border-radius:12px;background:#fff;align-content:start}
+.idea-way strong{font-size:14px;color:var(--ink)}
+.idea-way span{font-size:12px;line-height:1.7;color:var(--muted)}
+.idea-way:hover:not(:disabled){border-color:var(--green);background:#f6faf3}
+.idea-chat{margin-bottom:22px;min-height:300px}
+.doc-heading{font-size:13px;font-weight:600;margin:6px 0 10px}
+.module-next{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+/* The md file a module hands to the others */
+.doc-panel{border:1px solid var(--line);border-radius:12px;background:#fcfdfa;margin-top:24px}
+.idea-module .doc-panel{margin-top:0}
+.doc-panel summary{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:13px 16px;cursor:pointer}
+.doc-name{font-size:13px;font-weight:600;font-family:Consolas,"Microsoft YaHei",monospace}
+.doc-panel summary small{font-size:11px;color:var(--muted)}
+.doc-panel .inline-notice{margin:0 16px 12px}
+.doc-editor{display:block;width:calc(100% - 32px);margin:0 16px;min-height:220px;font-size:12px;line-height:1.8;font-family:Consolas,"Microsoft YaHei",monospace;background:#fff}
+.doc-actions{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:12px 16px 14px}
+.doc-actions .small-note{margin:0;max-width:560px}
+/* A module that has not run yet */
+.module-start{display:flex;flex-direction:column;align-items:center;text-align:center;padding:48px 24px;min-height:360px;justify-content:center}
+.module-start h2{margin:0 0 10px}
+.module-start p{max-width:520px;color:#5f6b61;line-height:1.8;margin:0 0 8px}
+.module-start .button-row{justify-content:center;margin-top:14px}
+.module-start > button{margin-top:14px}
+/* Check the exact text before it is sent */
+.send-refs{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:12px 0 16px}
+.send-refs .quiet-label{margin-right:2px}
+.send-ref{display:flex;align-items:center;gap:7px;margin:0;padding:7px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12px;color:var(--ink);cursor:pointer}
+.send-ref small{color:var(--muted);font-size:11px}
+.send-ref.empty{opacity:.55;cursor:not-allowed}
+.send-full-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.send-full-head label{margin:0}
+#send-state{margin:0}
+.send-editor{min-height:34vh;margin-top:7px}
+.send-model{max-width:280px;margin-top:12px}
+/* Sidebar: the project's files */
+.doc-status{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:4px}
+.doc-link{display:flex;justify-content:space-between;align-items:baseline;gap:8px;width:100%;border:0;background:none;padding:6px 0;text-align:left;font-size:12px;color:var(--muted)}
+.doc-link:hover{background:none;color:var(--green)}
+.doc-status li.complete .doc-link span{color:var(--ink)}
+.doc-link small{font-size:11px}
+@media(max-width:800px){.idea-ways{grid-template-columns:minmax(0,1fr)}.doc-actions{flex-direction:column;align-items:stretch}}

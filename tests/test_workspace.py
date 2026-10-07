@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from app import config, jobs, media, models, store, workspace
+from app import claude_cli, config, jobs, media, models, store, workspace
 from app.main import app
 
 
@@ -104,18 +104,18 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(d['sources'][0]['verification'], 'user_supplied')
         self.assertEqual(self.client.get('/api/opportunities').json(), [])
 
-    def test_angle_runs_script_using_research_context_without_extra_prompt(self):
+    def test_angle_runs_script_with_the_approved_text(self):
         research = self.version('research', research_result())
         def provider(task, kind, context, event, report):
             self.assertEqual(kind, 'script')
             self.assertEqual(context['selected_angle'], '角度 2')
-            self.assertEqual(context['research']['topics'][0]['id'], 'topic')
             self.assertNotIn('current', context)
+            self.assertEqual(claude_cli.prompt_override(task), '按角度 2 写')
             return script_result(), [], {'model': 'test'}
-        with patch.object(models, 'call', side_effect=provider):
-            r = self.client.post(self.url + '/workspace/angle', json={
-                'version_id': research['id'], 'topic_id': 'topic', 'angle_id': 'angle-2'})
-            self.assertEqual(r.status_code, 200)
+        with patch.object(models, 'call', side_effect=provider), patch.object(workspace.text_cli, 'available', return_value=True):
+            r = self.client.post(self.url + '/workspace/run', json={'module': 'script', 'prompt': '按角度 2 写', 'angle': {
+                'version_id': research['id'], 'topic_id': 'topic', 'angle_id': 'angle-2'}})
+            self.assertEqual(r.status_code, 200, r.text)
             t = self.wait_task(r.json()['id'])
         self.assertEqual(t['status'], 'completed', t.get('error'))
         p = store.get('project', self.p['id'])

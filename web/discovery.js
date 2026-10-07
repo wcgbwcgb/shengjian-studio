@@ -3,9 +3,9 @@
 // Home: start a new project, or pick up one you are working on.
 function renderHome() {
   const durations=[...new Set([Number(S.defaults.duration)||60,30,60,90,180])].sort((a,b)=>a-b), aspect=S.defaults.aspect||'9:16';
-  const create=`<section class="card new-project-card" aria-labelledby="new-project-title"><h2 id="new-project-title">＋ 新建项目</h2><p class="section-note">起个名字，写几句想法。建好后直接进入项目，从研究、脚本或视频任意一步开始。</p>
+  const create=`<section class="card new-project-card" aria-labelledby="new-project-title"><h2 id="new-project-title">＋ 新建项目</h2><p class="section-note">起个名字，写几句想法。建好后进入项目：我的idea、调研、文案、视频，不分先后，用到哪个打开哪个。</p>
     <div class="field"><label for="new-project-name">项目名称</label><input id="new-project-name" maxlength="80" placeholder="例如：老歌为什么在短视频翻红" value="${esc(sessionStorage.getItem('studio-new-name')||'')}"></div>
-    <div class="field"><label for="new-project-idea">想做什么 <span class="muted">可选</span></label><textarea id="new-project-idea" rows="3" maxlength="12000" placeholder="讲什么、给谁看、想要什么感觉。Claude 研究和写稿时会参考它。">${esc(sessionStorage.getItem('studio-new-idea')||'')}</textarea></div>
+    <div class="field"><label for="new-project-idea">想做什么 <span class="muted">可选</span></label><textarea id="new-project-idea" rows="3" maxlength="12000" placeholder="讲什么、给谁看、想要什么感觉。会放进「我的idea」的灵感碎片里。">${esc(sessionStorage.getItem('studio-new-idea')||'')}</textarea></div>
     <div class="publishing-grid"><div class="field"><label for="new-project-duration">时长</label><select id="new-project-duration">${durations.map(n=>`<option value="${n}" ${n===(Number(S.defaults.duration)||60)?'selected':''}>约 ${n<120?n+' 秒':n/60+' 分钟'}</option>`).join('')}</select></div><div class="field"><label for="new-project-aspect">画幅</label><select id="new-project-aspect">${[['9:16','竖屏 9:16'],['16:9','横屏 16:9'],['1:1','方形 1:1']].map(([v,l])=>`<option value="${v}" ${v===aspect?'selected':''}>${l}</option>`).join('')}</select></div></div>
     ${vbutton('new-project','创建并进入项目 →','primary new-project-submit')}
     <div class="new-project-alt"><span>或者</span>${vbutton('quick','＋ 从已有素材开始','text-button small','data-intent="assets"')}${vbutton('browse-inspiration','⌕ 没有想法？浏览灵感','text-button small')}</div><input id="home-assets" type="file" accept="video/*,audio/*,image/png,image/jpeg,image/webp" multiple hidden></section>`;
@@ -65,8 +65,4 @@ async function watchInspiration() {
 function workspaceModel(stage) {
   const chosen=currentModel(stage);
   return S.models.some(m=>m.id===chosen)?chosen:S.defaults['model_'+stage];
-}
-function workspaceTools(stage) {
-  const templates=S.templates.filter(t=>t.stage===stage);
-  return `<details class="workspace-tools"><summary>这次${stage==='script'?'写稿':'研究'}的模型与模板</summary><div class="settings-grid"><div class="field"><label>模型</label><select data-workspace-model="${stage}">${modelOptions(workspaceModel(stage))}</select></div><div class="field"><label>阶段模板</label><select id="workspace-template"><option value="">选择模板</option>${templates.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div></div><textarea id="workspace-stage-prompt" data-stage="${stage}" rows="2" placeholder="这次任务的补充要求">${esc(S.prompts[`${S.selected}:${stage}`]||'')}</textarea><div class="button-row">${vbutton('load-workspace-template','载入模板','small',`data-stage="${stage}"`)}${vbutton('save-workspace-template','保存为模板','small ghost',`data-stage="${stage}"`)}${stage==='script'?vbutton('regenerate-script','按要求生成新版脚本','small',activeTask()?'disabled':''):''}</div></details>`;
 }

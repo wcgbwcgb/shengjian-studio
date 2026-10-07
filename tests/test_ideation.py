@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from app import claude_cli, inspiration, models, store, text_cli
+from app import claude_cli, docs, inspiration, models, store, text_cli
 from app.main import app
 
 TOPIC = {'id': 't1', 'title': '松弛感从哪里来', 'question': '为什么有些歌让人放松？', 'key_facts': [{'claim': '测试事实'}],
@@ -27,9 +27,11 @@ class FakeModel:
         if mode == 'chat':
             if context['stage'] == 'clarify' and len([m for m in context['conversation'] if m['role'] == 'user']) < 1:
                 return {'reply': '好的，先确认受众。', 'question': '这条视频给谁看？', 'options': ['学生', '上班族', ''],
-                        'card': {'audience': '不懂乐理的人', 'bogus': 'x'}, 'action': 'revise_script'}, [], {}
-            return {'reply': '需求清楚了。', 'question': '', 'options': [], 'card': {'tone': '轻松'},
-                    'action': 'research', 'action_input': '对比实验', 'action_label': '开始研究'}, [], {}
+                        'action': 'revise_script'}, [], {}
+            return {'reply': '想法清楚了。', 'question': '', 'options': [], 'action': 'write_idea',
+                    'action_input': '# 我的想法\n讲给上班族的松弛感', 'action_label': '写入 我的idea.md'}, [], {}
+        if mode == 'idea':
+            return {'idea': '# 润色后的想法\n松弛感从哪里来'}, [], {}
         if mode == 'angles':
             return {'angles': [{'title': '新方向：讲一个人的故事', 'hook': '那天晚上…'}, {'title': ''}]}, [], {}
         if mode == 'research':
@@ -105,33 +107,123 @@ class IdeationTests(unittest.TestCase):
         self.client.post('/api/inspirations/undo')
         self.assertTrue(self.client.get('/api/inspirations').json()['ideas'][0]['title'].startswith('第3批'))
 
-    def test_clarifying_conversation_builds_card_and_proposes_research(self):
-        created = self.client.post('/api/creations', json={'idea': '讲讲松弛感', 'clarify': True}).json()
-        self.assertTrue(created['clarify'])
+    def test_conversation_clarifies_the_idea_and_writes_my_idea_md(self):
+        created = self.client.post('/api/creations', json={'idea': '讲讲松弛感', 'start': False}).json()
         pid = created['project']['id']
+        self.assertIsNone(created['task'])
+        self.assertEqual(store.get('project', pid)['workspace']['brainstorm'], '讲讲松弛感')
+        self.assertEqual(self.client.post(f'/api/projects/{pid}/workspace/chat', json={'message': '讲讲松弛感'}).status_code, 200)
         self.wait_project_idle(pid)
-        project = store.get('project', pid)
-        self.assertEqual(project['workspace']['card'], {'audience': '不懂乐理的人'})
+        mode, context = self.fake.calls[-1]
+        self.assertEqual((mode, context['brainstorm'], context['my_idea']), ('chat', '讲讲松弛感', ''))
         reply = next(m for m in store.listing('message', pid) if m['role'] == 'assistant')
         self.assertEqual(reply['options'], ['学生', '上班族'])
         self.assertEqual(reply['action'], 'none')  # revise_script is not available before a script exists
         self.assertEqual(self.client.post(f'/api/projects/{pid}/workspace/chat/action', json={'message_id': reply['id']}).status_code, 400)
-        self.client.patch(f'/api/projects/{pid}/workspace/card', json={'card': {'avoid': '术语', 'audience': ''}})
-        self.assertEqual(store.get('project', pid)['workspace']['card'], {'avoid': '术语'})
-        self.assertEqual(self.client.post(f'/api/projects/{pid}/workspace/chat', json={'message': '上班族，想轻松一点'}).status_code, 200)
+        self.client.post(f'/api/projects/{pid}/workspace/chat', json={'message': '上班族，想轻松一点'})
         self.wait_project_idle(pid)
         proposal = next(m for m in store.listing('message', pid) if m['role'] == 'assistant')
-        self.assertEqual(proposal['action'], 'research')
+        self.assertEqual(proposal['action'], 'write_idea')
         self.assertEqual(self.fake.calls[-1][1]['conversation'][-1]['text'], '好的，先确认受众。')
-        task = self.client.post(f'/api/projects/{pid}/workspace/chat/action', json={'message_id': proposal['id']}).json()
-        self.assertEqual(task['kind'], 'research')
-        self.assertIn('要避免：术语', task['payload']['prompt'])
-        self.assertIn('语气风格：轻松', task['payload']['prompt'])
-        self.assertIn('研究重点：对比实验', task['payload']['prompt'])
-        self.wait_project_idle(pid)
+        written = self.client.post(f'/api/projects/{pid}/workspace/chat/action', json={'message_id': proposal['id']})
+        self.assertEqual(written.status_code, 200, written.text)
+        idea = self.client.get(f'/api/projects/{pid}').json()['docs']['idea']
+        self.assertEqual((idea['text'], idea['origin']), ('# 我的想法\n讲给上班族的松弛感\n', 'chat'))
+        self.assertTrue(docs.path(pid, 'idea').is_file())
         self.assertEqual(self.client.post(f'/api/projects/{pid}/workspace/chat/action', json={'message_id': proposal['id']}).status_code, 400)
+        # Research and writing never start from the conversation without the creator seeing the text.
+        suggestion = store.put('message', {'stage': 'chat', 'role': 'assistant', 'text': '去调研吧', 'action': 'research',
+                                           'action_input': '对比实验'}, pid)
+        self.assertEqual(self.client.post(f'/api/projects/{pid}/workspace/chat/action', json={'message_id': suggestion['id']}).status_code, 400)
+        prompt = self.client.post(f'/api/projects/{pid}/workspace/compose', json={'module': 'research', 'request': '对比实验'}).json()['prompt']
+        task = self.client.post(f'/api/projects/{pid}/workspace/run', json={'module': 'research', 'request': '对比实验',
+                                'prompt': prompt, 'message_id': suggestion['id']}).json()
+        self.assertEqual(store.get('message', suggestion['id'])['action_task_id'], task['id'])
+        self.wait_project_idle(pid)
 
-    def test_more_angles_custom_angle_and_adjusted_angle(self):
+    def test_compose_shows_the_exact_text_and_run_sends_it(self):
+        pid = self.client.post('/api/creations', json={'name': '松弛感', 'idea': '想讲松弛感', 'start': False}).json()['project']['id']
+        url = f'/api/projects/{pid}/workspace'
+        # Without 我的idea.md the research request carries the idea itself and references nothing.
+        empty = self.client.post(url + '/compose', json={'module': 'research'}).json()
+        self.assertEqual(empty['refs'], [])
+        self.assertIn('我的想法：想讲松弛感', empty['request'])
+        self.assertTrue(empty['prompt'].startswith(models.SYSTEM))
+        self.client.put(url + '/docs/idea', json={'text': '# 我的想法\n讲给上班族'})
+        composed = self.client.post(url + '/compose', json={'module': 'research'}).json()
+        self.assertEqual(composed['refs'], ['idea'])
+        self.assertIn('【参考：我的idea.md】\n# 我的想法\n讲给上班族', composed['prompt'])
+        self.assertIn('【这次的要求】\n' + composed['request'], composed['prompt'])
+        self.assertNotIn('我的idea.md', self.client.post(url + '/compose', json={'module': 'research', 'refs': []}).json()['prompt'])
+        self.assertEqual(self.client.post(url + '/compose', json={'module': 'research', 'refs': ['bogus']}).status_code, 400)
+
+        task = self.client.post(url + '/run', json={'module': 'research', 'request': '调研对比实验',
+                                                    'prompt': '我改过的原文', 'refs': ['idea']}).json()
+        self.assertEqual((task['kind'], task['payload']['prompt'], task['payload']['refs']), ('research', '调研对比实验', ['idea']))
+        self.assertTrue(task['prompt_override'])
+        self.assertIsNone(task['edited_from'])
+        self.assertEqual(claude_cli.prompt_override(task), '我改过的原文')
+        self.wait_project_idle(pid)
+        research_doc = docs.read(pid, 'research')
+        self.assertIn('## 松弛感从哪里来', research_doc)
+        self.assertIn('### 角度 2：原始方向 2', research_doc)
+        self.assertTrue(docs.meta(store.get('project', pid))['research']['origin'].startswith('research:'))
+
+        # A hand-edited 调研.md is not overwritten by the next result until the creator asks.
+        self.client.put(url + '/docs/research', json={'text': '我自己整理的调研'})
+        self.client.post(url + '/run', json={'module': 'research', 'prompt': '再调研一次'})
+        self.wait_project_idle(pid)
+        state = self.client.get(f'/api/projects/{pid}').json()['docs']['research']
+        self.assertEqual(state['text'], '我自己整理的调研')
+        self.assertTrue(state['pending'])
+        synced = self.client.post(url + '/docs/research/sync').json()
+        self.assertIn('## 松弛感从哪里来', synced['text'])
+        self.assertFalse(synced['pending'])
+        self.assertEqual(self.client.post(url + '/docs/research/undo').json()['text'], '我自己整理的调研')
+
+        # Writing from a research angle records the angle; the text is the creator's.
+        research = next(v for v in store.listing('version', pid) if v['stage'] == 'research')
+        task = self.client.post(url + '/run', json={'module': 'script', 'prompt': '按角度写', 'refs': ['idea', 'research'],
+                                'angle': {'version_id': research['id'], 'topic_id': 't1', 'angle_id': 'angle-2'}}).json()
+        self.assertEqual(task['payload']['angle'], '原始方向 2')
+        self.wait_project_idle(pid)
+        project = store.get('project', pid)
+        self.assertEqual(project['workspace']['angle']['title'], '原始方向 2')
+        self.assertIn('开场', docs.read(pid, 'script'))
+        video = self.client.post(url + '/compose', json={'module': 'video', 'request': '做成 30 秒'}).json()
+        self.assertEqual(video['prompt'], '做成 30 秒\n\n参考当前文件夹里的 文案.md。')
+        both = self.client.post(url + '/compose', json={'module': 'video', 'request': '做', 'refs': ['research', 'script']}).json()
+        self.assertTrue(both['prompt'].endswith('参考当前文件夹里的 调研.md、文案.md。'))
+
+    def test_script_does_not_need_research(self):
+        pid = self.client.post('/api/creations', json={'name': '我的故事', 'start': False}).json()['project']['id']
+        url = f'/api/projects/{pid}/workspace'
+        composed = self.client.post(url + '/compose', json={'module': 'script'}).json()
+        self.assertEqual(composed['refs'], [])
+        self.assertIn('写一条约 60 秒的竖屏短视频文案', composed['request'])
+        task = self.client.post(url + '/run', json={'module': 'script', 'prompt': composed['prompt']}).json()
+        self.wait_project_idle(pid)
+        self.assertEqual(store.get('task', task['id'])['status'], 'completed')
+        self.assertEqual(self.client.get(f'/api/projects/{pid}').json()['docs']['script']['text'].splitlines()[0], '# 文案')
+
+    def test_brainstorm_kept_as_is_or_polished(self):
+        pid = self.client.post('/api/creations', json={'name': '我的故事', 'start': False}).json()['project']['id']
+        url = f'/api/projects/{pid}/workspace'
+        self.client.put(url + '/brainstorm', json={'text': '会计转行做配音\n第一次录音很紧张'})
+        kept = self.client.put(url + '/docs/idea', json={'text': '会计转行做配音\n第一次录音很紧张', 'origin': 'brainstorm'}).json()
+        self.assertEqual(kept['origin'], 'brainstorm')
+        self.assertEqual(self.client.put(url + '/docs/research', json={'text': 'x', 'origin': 'brainstorm'}).status_code, 400)
+        composed = self.client.post(url + '/compose', json={'module': 'polish'}).json()
+        self.assertIn('【我的零散想法】\n会计转行做配音\n第一次录音很紧张', composed['prompt'])
+        self.assertTrue(composed['prompt'].startswith(models.SYSTEM + models.SCHEMAS['idea']))
+        task = self.client.post(url + '/run', json={'module': 'polish', 'prompt': composed['prompt']}).json()
+        self.assertEqual(task['kind'], 'polish')
+        self.wait_project_idle(pid)
+        idea = self.client.get(f'/api/projects/{pid}').json()['docs']['idea']
+        self.assertEqual((idea['text'], idea['origin'], idea['can_undo']), ('# 润色后的想法\n松弛感从哪里来\n', 'polish', True))
+        self.assertEqual(self.client.post(url + '/docs/idea/undo').json()['text'], '会计转行做配音\n第一次录音很紧张')
+
+    def test_more_angles_reuse_research(self):
         pid = self.client.post('/api/projects', json={'name': '方向'}).json()['id']
         research = store.put('version', {'stage': 'research', 'result': {'topics': [TOPIC], 'sources': []}}, pid)
         response = self.client.post(f'/api/projects/{pid}/workspace/angles',
@@ -145,18 +237,10 @@ class IdeationTests(unittest.TestCase):
         self.assertEqual([a['title'] for a in extra], ['新方向：讲一个人的故事'])
         chat = [m['text'] for m in reversed(store.listing('message', pid)) if m.get('stage') == 'chat']
         self.assertEqual(chat[0], '换几个方向：都太严肃')
-        task = self.client.post(f'/api/projects/{pid}/workspace/angle', json={'version_id': research['id'], 'topic_id': 't1',
-                                'angle_id': extra[0]['id'], 'note': '开场换成一个故事'}).json()
-        self.assertIn('开场换成一个故事', task['payload']['prompt'])
-        self.assertIn('新方向：讲一个人的故事', task['payload']['prompt'])
+        task = self.client.post(f'/api/projects/{pid}/workspace/run', json={
+            'module': 'script', 'prompt': '按新方向写', 'angle': {'version_id': research['id'], 'topic_id': 't1', 'angle_id': extra[0]['id']}}).json()
+        self.assertEqual(task['payload']['angle'], '新方向：讲一个人的故事')
         self.wait_project_idle(pid)
-        task = self.client.post(f'/api/projects/{pid}/workspace/angle/custom', json={'title': '我自己的方向', 'detail': '从合唱团讲起'}).json()
-        self.assertIn('我自己的方向', task['payload']['prompt'])
-        self.wait_project_idle(pid)
-        project = store.get('project', pid)
-        self.assertEqual(project['workspace']['angle']['title'], '我自己的方向')
-        self.assertTrue(any(a.get('custom') for a in project['workspace']['extra_angles']['t1']))
-
 
 if __name__ == '__main__':
     unittest.main()
