@@ -30,7 +30,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1
 
 ### 视频页：制作要求
 
-视频页只有一段制作要求（prompt）。工作台把这段文字原样交给本机 Claude Code（默认 Opus），不附加任何规则、格式要求或项目默认设置，效果与在终端里直接对 Claude Code 说这句话相同。
+视频页只有一段制作要求（prompt）。工作台把这段文字原样交给本机 Claude Code（默认 Opus、effort medium，可在设置中调整；不沿用终端里的 effort 设置），不附加任何规则、格式要求或项目默认设置，效果与在终端里直接对 Claude Code 说这句话相同。
 
 - **工作文件夹**：每个项目一个，位于 `data/projects/<项目>/claude/`。Claude 在这里自由工作，后续修改会接着上一次的对话继续。
 - **素材**：项目素材按原文件名复制到工作文件夹的 `素材/` 目录（只读）。想怎么用直接写在要求里，例如「用素材里的 main.mp4 开头」。

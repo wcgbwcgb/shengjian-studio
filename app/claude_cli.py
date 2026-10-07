@@ -16,7 +16,8 @@ from pathlib import Path
 
 from . import assets as asset_store, config, media, store
 
-DEFAULTS = {'path': '', 'model': 'opus', 'timeout_sec': 7200, 'max_turns': 300}
+DEFAULTS = {'path': '', 'model': 'opus', 'effort': 'medium', 'timeout_sec': 7200, 'max_turns': 300}
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 LEGACY_LIMITS = {'timeout_sec': 1800, 'max_turns': 50}
 MIN_VERSION = (2, 1, 248)
 # Persistent, agent-writable environment for Python/Node packages, browsers and templates.
@@ -42,6 +43,10 @@ def save(body):
         if not re.fullmatch(r'(opus|sonnet|haiku|claude-[a-z0-9.-]+)', model):
             raise ValueError('请选择 Claude 模型或填写完整 Claude 模型 ID')
         value['model'] = model
+    if 'effort' in body:
+        if body['effort'] not in EFFORTS:
+            raise ValueError('effort 应为 ' + ' / '.join(EFFORTS))
+        value['effort'] = body['effort']
     for key, low, high in [('timeout_sec', 60, 21600), ('max_turns', 1, 2000)]:
         if key in body:
             try:
@@ -303,6 +308,8 @@ def copy_input(source, target, event):
             if not chunk:
                 break
             outgoing.write(chunk)
+    stat = source.stat()
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns))
 
 
 def prepare(task, event, report):
@@ -322,7 +329,9 @@ def prepare(task, event, report):
         if event.is_set():
             raise media.Cancelled()
         source, target = asset_store.file(asset), folder / names[asset['id']]
-        if not (target.is_file() and target.stat().st_size == source.stat().st_size):
+        # Size alone misses a swap of two same-sized files after reordering; copies carry the source mtime.
+        if not (target.is_file() and (target.stat().st_size, target.stat().st_mtime_ns)
+                == (source.stat().st_size, source.stat().st_mtime_ns)):
             copy_input(source, target, event)
     if folder.is_dir():
         # Keep the folder in step with the project: removed materials disappear here too.
@@ -556,6 +565,8 @@ def execute(task, event, report):
     work, control, session = prepare(task, event, report)
     # dontAsk denies anything not approved; the PreToolUse hook approves all but destructive actions.
     args = command + ['-p', '--output-format', 'stream-json', '--verbose', '--model', settings['model'],
+                      # Explicit, so the user's own Claude Code effort setting never applies here.
+                      '--effort', settings.get('effort', DEFAULTS['effort']),
                       '--max-turns', str(settings['max_turns']), '--permission-mode', 'dontAsk',
                       '--tools', 'default', '--settings', str(control / 'settings.json'),
                       '--strict-mcp-config', '--mcp-config', str(control / 'mcp.json')]

@@ -216,6 +216,7 @@ class CliVideoTests(unittest.TestCase):
         received = self.received()
         self.assertEqual(received['prompt'], '把开头调整一下')
         args = received['argv']
+        self.assertEqual(args[args.index('--effort')+1], 'medium')
         self.assertEqual(args[args.index('--resume')+1], version['cli_session_id'])
         self.assertIn('--fork-session', args)
         self.assertNotEqual(second['cli_session_id'], task['cli_session_id'])
@@ -296,12 +297,13 @@ class CliVideoTests(unittest.TestCase):
             task = self.submit()
         self.assertEqual(task['status'], 'failed')
         self.assertEqual(task['cli_result']['reported_cost_usd'], .02)
-        self.client.put('/api/claude-code', json={'model':'sonnet'})
+        self.client.put('/api/claude-code', json={'model':'sonnet', 'effort':'max'})
         response = self.client.post('/api/tasks/' + task['id'] + '/retry', json={})
         result = self.wait_task(response.json()['id'])
         self.assertEqual(result['status'], 'completed', result.get('error'))
         self.assertEqual(result['cli_config']['model'], 'opus')
         args = self.received()['argv']
+        self.assertEqual(args[args.index('--effort')+1], 'medium')
         self.assertEqual(args[args.index('--resume')+1], task['cli_session_id'])
 
     def test_read_only_cli_check_does_not_persist_account_details(self):
