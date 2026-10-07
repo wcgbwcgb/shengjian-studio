@@ -154,7 +154,7 @@ function docOrigin(d) {
 // The file other modules reference. Edits are kept as a draft until saved.
 function docPanel(key,open=false) {
   const d=docs()[key]||{name:key,text:''}, draft=W.docDrafts[key], text=draft??d.text, chars=d.text.trim().length;
-  if(d.generated)return `<details class="doc-panel" data-doc-panel="${key}" ${W.docOpen[key]??open?'open':''}><summary><span class="doc-name">${esc(d.name)}</span><small>${chars?chars+' 字 · 由素材列表自动生成':'还没有素材'}</small></summary><textarea class="doc-editor" rows="10" readonly aria-label="${esc(d.name)}">${esc(text)}</textarea><div class="doc-actions"><span class="small-note">这份文件跟着上面的列表自动更新：改用途、说明或顺序就行。其他模块发送时勾选「${esc(d.name)}」就会参考它。</span></div></details>`;
+  if(d.generated)return `<details class="doc-panel" data-doc-panel="${key}" ${W.docOpen[key]??open?'open':''}><summary><span class="doc-name">${esc(d.name)}</span><small data-doc-status="${key}">${materialsStatus()}</small></summary><textarea class="doc-editor" data-doc-view="${key}" rows="10" readonly aria-label="${esc(d.name)}">${esc(text)}</textarea><div class="doc-actions"><span class="small-note">这份文件跟着上面的列表更新：改用途、说明或顺序就行，停顿一下会自动保存，也可以点「保存」立刻生效。其他模块发送时勾选「${esc(d.name)}」就会参考它。</span><div class="button-row">${vbutton('materials-save','保存','primary small',Object.keys(W.materialPending||{}).length?'':'disabled')}</div></div></details>`;
   const status=draft!==undefined?'有未保存的修改':chars?[`${chars} 字`,docOrigin(d),d.updated_at&&date(d.updated_at)].filter(Boolean).join(' · '):'还没有内容';
   const isOpen=W.docOpen[key]??(open||draft!==undefined);
   return `<details class="doc-panel" data-doc-panel="${key}" ${isOpen?'open':''}><summary><span class="doc-name">${esc(d.name)}</span><small data-doc-status="${key}">${status}</small></summary>
@@ -211,6 +211,27 @@ async function saveMaterial(id,body) {
   const saved=await api(`/projects/${S.selected}/workspace/materials/${id}`,body,'PATCH');
   const i=S.detail.assets.findIndex(a=>a.id===id);if(i>=0)S.detail.assets[i]={...S.detail.assets[i],...saved};
   S.detail.docs=(await api(`/projects/${S.selected}`)).docs;
+  showMaterialsDoc();
+}
+// Notes and labels typed but not yet saved, keyed by material and field.
+function materialsStatus() {
+  const n=docText('materials').trim().length;
+  if(Object.keys(W.materialPending||{}).length)return '有说明还没保存';
+  return n?n+' 字 · 由素材列表自动生成':'还没有素材';
+}
+function showMaterialsDoc() {
+  const view=$('[data-doc-view="materials"]');if(view)view.value=docText('materials');
+  const status=$('[data-doc-status="materials"]');if(status)status.textContent=materialsStatus();
+  const save=$('[data-action="v2-materials-save"]');if(save)save.disabled=!Object.keys(W.materialPending||{}).length;
+}
+async function saveMaterialNow(key) {
+  const item=W.materialPending?.[key];if(!item)return;
+  clearTimeout(item.timer);delete W.materialPending[key];
+  try{await saveMaterial(item.id,{[item.field]:item.value});}
+  catch(error){if(!W.materialPending[key])W.materialPending[key]=item;showMaterialsDoc();throw error;}
+}
+async function flushMaterials() {
+  for(const key of Object.keys(W.materialPending||{}))await saveMaterialNow(key);
 }
 async function saveMaterialOrder(body) {
   const result=await api(`/projects/${S.selected}/workspace/materials`,body,'PUT');
@@ -236,6 +257,7 @@ const SEND = {polish:{title:'AI 润色我的idea',go:'发送，开始润色',tab
 function sendState() {return W.send?.edited?`你改过原文，上面的变化不会再自动更新。${vbutton('send-recompose','按上面重新生成原文','text-button small')}`:'根据上面的要求和参考生成，可以直接修改。';}
 async function sendModal(module,{request=null,refs=null,extra={}}={}) {
   if(readDraft())await flushScript();
+  await flushMaterials();
   const c=await api(`/projects/${S.selected}/workspace/compose`,{module,request,refs});
   W.send={module,extra,edited:false};
   const refBoxes=`<div class="send-refs"><span class="quiet-label">参考</span>${(module==='polish'?['materials']:DOC_KEYS).map(key=>{const d=docs()[key]||{name:key,text:''},n=d.text.trim().length;return `<label class="send-ref ${n?'':'empty'}"><input type="checkbox" data-send-ref="${key}" ${c.refs.includes(key)?'checked':''} ${n?'':'disabled'}>${esc(d.name)}<small>${n?n+' 字':'还没有内容'}</small></label>`;}).join('')}</div>`;
@@ -534,6 +556,8 @@ async function handleV2(action,el) {
   }
   if(a==='idea-polish'){await flushBrainstorm();if(!(W.brainstorm??wcontext().brainstorm??'').trim()){$('#brainstorm')?.focus();throw new Error('先在灵感碎片里写点什么。');}return sendModal('polish');}
   if(a==='idea-chat'){await flushBrainstorm();W.ideaChat=true;render();(chatMessages().length?$('#chat-input'):$('[data-action="v2-chat-start"]'))?.focus();return;}
+  // The click handler re-enables the button afterwards; set its state once that has run.
+  if(a==='materials-save'){await flushMaterials();toast('已保存，素材.md 已更新。');setTimeout(showMaterialsDoc);return;}
   if(a==='upload-reference'){W.uploadPurpose='reference';$('#workspace-assets').click();return;}
   if(a==='material-move'){
     const ids=ownMaterials().map(m=>m.id),i=ids.indexOf(el.dataset.id),j=i+Number(el.dataset.step);
@@ -605,7 +629,7 @@ async function handleV2(action,el) {
     const input=$('#creation-idea');input.placeholder={research:'想深入了解什么话题？我来找事实、不同观点和创作角度。',reference:'粘贴参考视频链接，我来研究开场、叙事方式与可借鉴的角度。',idea:'一个粗糙的想法也可以，先告诉我你想讲什么。'}[W.intent];input.focus();
     $$('.quick-action').forEach(b=>b.classList.toggle('selected',b===el));return;
   }
-  if(a==='tab') {if(readDraft())await flushScript();W.tab=el.dataset.tab;history.pushState(null,'',`#workspace/${S.selected}/${W.tab}`);render();return;}
+  if(a==='tab') {if(readDraft())await flushScript();await flushMaterials();W.tab=el.dataset.tab;history.pushState(null,'',`#workspace/${S.selected}/${W.tab}`);render();return;}
   if(a==='topic'){W.topic=el.dataset.id;render();return;}
   if(a==='connect'){sessionStorage.setItem('studio-return',`#workspace/${S.selected}/${W.tab}`);return navigate('settings');}
   if(a==='angle'){
@@ -665,9 +689,10 @@ document.addEventListener('input',event=>{
   if(el.id==='brainstorm'){W.brainstorm=el.value;$('#brainstorm-status').textContent='正在保存…';clearTimeout(W.brainstormTimer);W.brainstormTimer=setTimeout(()=>flushBrainstorm().catch(error=>toast(error.message,true)),800);}
   if(el.dataset.doc){const key=el.dataset.doc;W.docDrafts[key]=el.value;const save=$(`[data-action="v2-doc-save"][data-key="${key}"]`);if(save)save.disabled=false;const status=$(`[data-doc-status="${key}"]`);if(status)status.textContent='有未保存的修改';}
   if(el.dataset.materialNote||el.dataset.materialLabel){
-    const id=el.dataset.materialNote||el.dataset.materialLabel,field=el.dataset.materialNote?'note':'purpose_label';
-    W.materialTimers=W.materialTimers||{};clearTimeout(W.materialTimers[id+field]);
-    W.materialTimers[id+field]=setTimeout(()=>saveMaterial(id,{[field]:el.value}).catch(error=>toast(error.message,true)),700);
+    const id=el.dataset.materialNote||el.dataset.materialLabel,field=el.dataset.materialNote?'note':'purpose_label',key=id+':'+field;
+    W.materialPending=W.materialPending||{};clearTimeout(W.materialPending[key]?.timer);
+    W.materialPending[key]={id,field,value:el.value,timer:setTimeout(()=>saveMaterialNow(key).catch(error=>toast(error.message,true)),700)};
+    showMaterialsDoc();
   }
   if(el.id==='send-request'){clearTimeout(W.composeTimer);W.composeTimer=setTimeout(()=>recompose().catch(error=>toast(error.message,true)),400);}
   if(el.id==='send-prompt'&&W.send&&!W.send.edited){W.send.edited=true;$('#send-state').innerHTML=sendState();}
@@ -709,7 +734,7 @@ document.addEventListener('drop',async event=>{
   try{await saveMaterialOrder({order:ids});}catch(error){toast(error.message,true);}
 });
 document.addEventListener('toggle',event=>{if(event.target.matches?.('details[data-advanced]'))W.advancedOpen=event.target.open;if(event.target.matches?.('details[data-doc-panel]'))W.docOpen[event.target.dataset.docPanel]=event.target.open;},true);
-window.addEventListener('beforeunload',event=>{if(readDraft()||Object.keys(W.docDrafts).length){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(readDraft()||Object.keys(W.docDrafts).length||Object.keys(W.materialPending||{}).length){event.preventDefault();event.returnValue='';}});
 
 async function flushBrainstorm() {
   clearTimeout(W.brainstormTimer);
