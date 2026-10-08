@@ -4,13 +4,10 @@ cd "$(dirname "$0")" || exit 1
 PORT=8765
 URL="http://127.0.0.1:$PORT"
 
-for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-    if [ -x "$b" ]; then eval "$("$b" shellenv)"; break; fi
-done
-export PATH="$HOME/.local/bin:$PATH"
+. scripts/mac-env.sh
 
-if [ ! -x .venv/bin/python ]; then
-    echo '还没有安装。请先双击「安装.command」。'
+if ! .venv/bin/python -c 'import uvicorn' 2>/dev/null; then
+    echo '还没有安装好（或者文件夹被移动过）。请先双击「安装.command」。'
     read -r -p '按回车键关闭…'
     exit 1
 fi
