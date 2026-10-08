@@ -194,6 +194,11 @@ class IdeationTests(unittest.TestCase):
         self.assertEqual(video['prompt'], '做成 30 秒\n\n参考当前文件夹里的 文案.md。')
         both = self.client.post(url + '/compose', json={'module': 'video', 'request': '做', 'refs': ['research', 'script']}).json()
         self.assertTrue(both['prompt'].endswith('参考当前文件夹里的 调研.md、文案.md。'))
+        self.assertEqual(video['abilities']['optimized-audio'], '优化音频生成速度')
+        audio = self.client.post(url + '/compose', json={'module': 'video', 'request': '做成 30 秒',
+                                                         'abilities': ['optimized-audio', 'removed']}).json()
+        guide = (docs.ABILITY_DIR / 'optimized-audio.md').as_posix()
+        self.assertEqual(audio['prompt'], f'做成 30 秒\n\n参考当前文件夹里的 文案.md。\n\n优化音频生成速度：先读 {guide}，按里面的做法做。')
 
     def test_script_does_not_need_research(self):
         pid = self.client.post('/api/creations', json={'name': '我的故事', 'start': False}).json()['project']['id']

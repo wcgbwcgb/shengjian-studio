@@ -18,6 +18,8 @@ DEFAULT_REFS = {'polish': (), 'research': ('idea',), 'script': ('idea', 'researc
 ALLOWED_REFS = {'polish': ('materials',)}
 PURPOSES = {'edit': '剪辑素材', 'reference': '参考', 'music': '配乐', 'other': '其他'}
 TYPE_NAMES = {'Video': '视频', 'Image': '图片', 'Audio': '音频', 'Music': '音乐'}
+# Guides a video run can be pointed to, one md file each. Claude may read them but not change them.
+ABILITY_DIR = store.ROOT / 'agent-ability'
 
 
 def path(project_id, key):
@@ -217,7 +219,16 @@ def default_refs(project, module):
     return [key for key in DEFAULT_REFS[module] if read(project['id'], key).strip()]
 
 
-def compose(project, module, request, refs, brainstorm=''):
+def abilities():
+    """The guides in agent-ability/, keyed by file name; each is named by its first heading."""
+    found = {}
+    for file in sorted(ABILITY_DIR.glob('*.md')):
+        first = next((line for line in file.read_text(encoding='utf-8').splitlines() if line.strip()), '')
+        found[file.stem] = first.lstrip('#').strip() if first.startswith('#') else file.stem
+    return found
+
+
+def compose(project, module, request, refs, brainstorm='', chosen=()):
     """The complete text a run sends to Claude. The creator sees and may edit it before sending."""
     if module not in MODULES:
         raise ValueError('不支持的模块')
@@ -226,7 +237,11 @@ def compose(project, module, request, refs, brainstorm=''):
     if module == 'video':
         # Claude Code runs in the folder that holds the files; naming them is enough.
         names = '、'.join(NAMES[k] for k in attached)
-        return request.strip() + (f'\n\n参考当前文件夹里的 {names}。' if names else '')
+        text = request.strip() + (f'\n\n参考当前文件夹里的 {names}。' if names else '')
+        # A guide removed from agent-ability/ is skipped. They live outside Claude's folder, so they are named by full path.
+        known = abilities()
+        guides = [f'{known[k]}：先读 {(ABILITY_DIR / (k + ".md")).as_posix()}，按里面的做法做。' for k in known if k in chosen]
+        return text + ('\n\n' + '\n'.join(guides) if guides else '')
     mode = 'idea' if module == 'polish' else module
     parts = [models.SYSTEM + models.SCHEMAS[mode] + ('\n必须使用实际联网工具，无法访问时如实说明；禁止编造来源、日期和互动数据。'
                                                      if module == 'research' else '\n本次不联网；禁止编造来源、日期和互动数据。'),

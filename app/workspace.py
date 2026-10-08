@@ -429,6 +429,7 @@ class Compose(BaseModel):
     module: str
     request: str | None = Field(default=None, max_length=20000)  # None: the module's default request
     refs: list[str] | None = None  # None: the module's default references
+    abilities: list[str] = []  # video: guides in agent-ability/ Claude is told to read
 
 
 def compose_parts(p, body):
@@ -446,7 +447,8 @@ def compose(project_id: str, body: Compose):
     p = store.get('project', project_id)
     request, refs = compose_parts(p, body)
     return {'module': body.module, 'request': request, 'refs': refs,
-            'prompt': docs.compose(p, body.module, request, refs, workspace(p).get('brainstorm', ''))}
+            'abilities': docs.abilities() if body.module == 'video' else {},
+            'prompt': docs.compose(p, body.module, request, refs, workspace(p).get('brainstorm', ''), body.abilities)}
 
 
 class AngleRef(BaseModel):

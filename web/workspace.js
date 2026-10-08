@@ -254,15 +254,20 @@ function angleRequest(a) {
 
 // Every run is checked first: the creator sees, and may edit, the exact text Claude will get.
 const SEND = {polish:{title:'AI 润色我的idea',go:'发送，开始润色',tab:'idea'},research:{title:'调研',go:'发送，开始调研',tab:'research'},script:{title:'写文案',go:'发送，开始写文案',tab:'script'},video:{title:'制作视频',go:'发送，开始制作',tab:'video'}};
+// Guides from agent-ability/ ticked for video runs; the last choice is kept for the next run.
+function savedAbilities() {try{return JSON.parse(localStorage.getItem('studio-abilities')||'[]');}catch{return [];}}
+function chosenAbilities() {return $$('[data-send-ability]').filter(b=>b.checked).map(b=>b.dataset.sendAbility);}
 function sendState() {return W.send?.edited?`你改过原文，上面的变化不会再自动更新。${vbutton('send-recompose','按上面重新生成原文','text-button small')}`:'根据上面的要求和参考生成，可以直接修改。';}
 async function sendModal(module,{request=null,refs=null,extra={}}={}) {
   if(readDraft())await flushScript();
   await flushMaterials();
-  const c=await api(`/projects/${S.selected}/workspace/compose`,{module,request,refs});
+  const c=await api(`/projects/${S.selected}/workspace/compose`,{module,request,refs,abilities:module==='video'?savedAbilities():[]});
+  const chosen=savedAbilities().filter(k=>k in c.abilities);
   W.send={module,extra,edited:false};
+  const abilityBoxes=Object.keys(c.abilities||{}).length?`<div class="send-refs"><span class="quiet-label">制作能力</span>${Object.entries(c.abilities).map(([key,label])=>`<label class="send-ref"><input type="checkbox" data-send-ability="${esc(key)}" ${chosen.includes(key)?'checked':''}>${esc(label)}<small>agent-ability/${esc(key)}.md</small></label>`).join('')}</div>`:'';
   const refBoxes=`<div class="send-refs"><span class="quiet-label">参考</span>${(module==='polish'?['materials']:DOC_KEYS).map(key=>{const d=docs()[key]||{name:key,text:''},n=d.text.trim().length;return `<label class="send-ref ${n?'':'empty'}"><input type="checkbox" data-send-ref="${key}" ${c.refs.includes(key)?'checked':''} ${n?'':'disabled'}>${esc(d.name)}<small>${n?n+' 字':'还没有内容'}</small></label>`;}).join('')}</div>`;
   const stage=module==='research'?'research':'script';
-  modal(`发送给 Claude：${SEND[module].title}`,`<label for="send-request">这次的要求</label><textarea id="send-request" rows="4" maxlength="20000" placeholder="${module==='video'?'写下视频制作要求':'写下这次的要求'}">${esc(c.request)}</textarea>${refBoxes}
+  modal(`发送给 Claude：${SEND[module].title}`,`<label for="send-request">这次的要求</label><textarea id="send-request" rows="4" maxlength="20000" placeholder="${module==='video'?'写下视频制作要求':'写下这次的要求'}">${esc(c.request)}</textarea>${refBoxes}${abilityBoxes}
     <div class="send-full-head"><label for="send-prompt">将发送的完整原文</label><span id="send-state" class="small-note">${sendState()}</span></div>
     <textarea id="send-prompt" class="sent-editor send-editor" spellcheck="false">${esc(c.prompt)}</textarea>
     <p class="small-note">${module==='video'?'Claude Code 就在项目文件夹里工作，勾选的文件在它手边，它会自己打开。除了这段文字，不附加任何规则。':'框里的文字会一字不差地发给 Claude，勾选的文件内容已经放在里面。返回格式由程序固定，改原文不影响结果的结构。'}</p>
@@ -273,7 +278,7 @@ async function recompose() {
   const s=W.send;
   if(!s||s.edited||!$('#send-prompt'))return;
   const ticket=s.ticket=(s.ticket||0)+1;
-  const c=await api(`/projects/${S.selected}/workspace/compose`,{module:s.module,request:$('#send-request').value,refs:$$('[data-send-ref]').filter(b=>b.checked).map(b=>b.dataset.sendRef)});
+  const c=await api(`/projects/${S.selected}/workspace/compose`,{module:s.module,request:$('#send-request').value,refs:$$('[data-send-ref]').filter(b=>b.checked).map(b=>b.dataset.sendRef),abilities:chosenAbilities()});
   if(W.send===s&&s.ticket===ticket&&!s.edited&&$('#send-prompt'))$('#send-prompt').value=c.prompt;
 }
 async function saveDoc(key,text,origin='manual') {
@@ -718,6 +723,7 @@ document.addEventListener('change',async event=>{
     if(el.id==='workspace-assets'&&el.files.length)await workspaceUpload([...el.files]);
     if(el.dataset.rewriteMore&&el.value)await handleV2('v2-rewrite',{dataset:{id:el.dataset.rewriteMore,instruction:el.value}});
     if(el.dataset.sendRef)await recompose();
+    if(el.dataset.sendAbility){try{localStorage.setItem('studio-abilities',JSON.stringify(chosenAbilities()));}catch{}await recompose();}
     if(el.dataset.materialPurpose){await saveMaterial(el.dataset.materialPurpose,{purpose:el.value});render();}
     if(el.name==='material-sequence')await saveMaterialOrder({sequence:el.value});
   }catch(error){toast(error.message,true);}
