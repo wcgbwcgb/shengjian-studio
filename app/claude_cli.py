@@ -358,7 +358,10 @@ def prepare(task, event, report):
     hook_args = [sys.executable, str(Path(__file__).with_name('cli_guard.py')), '--root', str(work), '--run', str(work),
                  '--toolbox', str(TOOLBOX), '--temp', tempfile.gettempdir(), '--protect-pid', str(os.getpid()),
                  '--workbench-python', sys.executable, '--project-env', str(store.ROOT / '.env')]
-    runtime_settings = {'hooks': {'PreToolUse': [{'matcher': '*',
+    # The work folder sits inside the workbench repository, so Claude Code would otherwise load
+    # (and could write) the workbench developer's auto-memory: context the creator never sees.
+    runtime_settings = {'autoMemoryEnabled': False,
+                        'hooks': {'PreToolUse': [{'matcher': '*',
                          'hooks': [{'type': 'command', 'command': hook_args[0],
                                     'args': hook_args[1:], 'timeout': 10}]}]}}
     # Keep policy files outside the agent's writable directories.
@@ -526,8 +529,10 @@ def save_video(task, source, work, summary, event, report):
     if not probe['has_video'] or not math.isfinite(probe['duration']):
         raise ValueError('Claude Code 生成的视频文件无法读取：' + source.name)
     visual = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+    # yuvj420p is yuv420p with full-range levels (videos built from JPEG/PNG frames, Remotion's default).
+    # Browsers play it, and re-encoding would keep the range anyway.
     playable = (source.suffix.lower() in ('.mp4', '.m4v', '.mov') and visual.get('codec_name') == 'h264'
-                and visual.get('pix_fmt') == 'yuv420p'
+                and visual.get('pix_fmt') in ('yuv420p', 'yuvj420p')
                 and all(s.get('codec_name') == 'aac' for s in probe['streams'] if s['codec_type'] == 'audio'))
     target = store.project_file(task['project_id'], f'videos/{task["id"]}/video.mp4')
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -41,6 +41,8 @@ if mode in ('success', 'failed_with_video'):
     shutil.copyfile(os.environ['CLI_TEST_VIDEO'], work / 'final.mp4')
 elif mode == 'convert':
     shutil.copyfile(os.environ['CLI_TEST_ALT_VIDEO'], work / 'final.mkv')
+elif mode == 'full_range':
+    shutil.copyfile(os.environ['CLI_TEST_FULL_RANGE_VIDEO'], work / 'final.mp4')
 elif mode == 'corrupt':
     (work / 'final.mp4').write_bytes(b'not a video')
 if mode in ('failed', 'failed_with_video'):

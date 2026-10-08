@@ -16,6 +16,7 @@ wet = fftconvolve(stereo, ir[:, None], axes=0)[: len(stereo)]
 ## 其他常见的慢点
 
 - 不要在 Python 里逐个采样循环。用 numpy 整段向量化计算；音符、鼓点这类事件可以循环，但每个事件内部要向量化。
+- 平滑、包络、旁白闪避这类移动平均也不要用 `np.convolve` 配长窗口，改用 `np.cumsum` 前后相减，或 `scipy.ndimage.uniform_filter1d`。一条 9 分钟的闪避曲线用 `np.convolve` 跑了 5 分钟还没结束，换成 cumsum 后，整段配乐 27 秒就做完了。
 - 滤波用 `scipy.signal.sosfilt` 加上 `butter(..., output='sos')`，同一个滤波器只设计一次，重复使用。
 - 同一个音色或采样（鼓、和弦）只合成一次，缓存后多次叠加，不要每拍重新生成。
 - 合成时就用最终的采样率，避免中途反复重采样。

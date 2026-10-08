@@ -108,6 +108,12 @@ class CliVideoTests(unittest.TestCase):
         media.run([FFMPEG, '-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=24',
                    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '2',
                    '-c:v', 'mpeg4', '-c:a', 'pcm_s16le', str(cls.alt_video)], event)
+        # Full-range H.264, as rendered from JPEG frames or by Remotion; browsers play it as is.
+        cls.full_range_video = Path(cls.fixtures.name) / 'full_range.mp4'
+        media.run([FFMPEG, '-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=24',
+                   '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '2',
+                   *media.video_encoding(), '-pix_fmt', 'yuv420p', '-color_range', 'pc', '-c:a', 'aac',
+                   str(cls.full_range_video)], event)
 
     @classmethod
     def tearDownClass(cls):
@@ -120,6 +126,7 @@ class CliVideoTests(unittest.TestCase):
         self.command = patch.object(claude_cli, 'cli_command', return_value=[sys.executable, str(FAKE)])
         self.command.start()
         self.env = patch.dict(os.environ, {'CLI_TEST_VIDEO': str(self.video), 'CLI_TEST_ALT_VIDEO': str(self.alt_video),
+                              'CLI_TEST_FULL_RANGE_VIDEO': str(self.full_range_video),
                               'CLI_TEST_MODE': 'success', 'ANTHROPIC_API_KEY': 'sk-ant-test-never-forward-this-key'})
         self.env.start()
         config.save({'ffmpeg_path': FFMPEG, 'ffprobe_path': FFPROBE})
@@ -198,8 +205,11 @@ class CliVideoTests(unittest.TestCase):
         self.assertTrue(version['preview']['checks']['decodable'])
         self.assertEqual(store.get('project', self.project['id'])['adopted']['edit'], version['id'])
         self.assertEqual(store.listing('usage'), [])
-        settings = store.project_file(self.project['id'], 'agent-control/' + task['id'] + '/settings.json')
-        hook = json.loads(settings.read_text(encoding='utf-8'))['hooks']['PreToolUse'][0]['hooks'][0]
+        settings = json.loads(store.project_file(self.project['id'], 'agent-control/' + task['id'] + '/settings.json')
+                              .read_text(encoding='utf-8'))
+        # The work folder is inside the workbench repo; its developer memory must not reach the video run.
+        self.assertIs(settings['autoMemoryEnabled'], False)
+        hook = settings['hooks']['PreToolUse'][0]['hooks'][0]
         # Exercise the generated hook using real argv, including paths with spaces.
         hook_command = [hook['command'], *hook['args']]
         for path, decision in [(self.work() / 'work' / 'edit.py', 'allow'), (self.work() / '素材' / 'original.mp4', 'deny')]:
@@ -268,6 +278,19 @@ class CliVideoTests(unittest.TestCase):
         codecs = {s['codec_type']: s['codec_name'] for s in probe['streams']}
         self.assertEqual(codecs, {'video': 'h264', 'audio': 'aac'})
         self.assertTrue((self.work() / 'final.mkv').is_file())
+
+    def test_full_range_h264_is_kept_without_converting(self):
+        event = threading.Event()
+        if next(s for s in media.probe(self.full_range_video, event)['streams'] if s['codec_type'] == 'video').get('pix_fmt') != 'yuvj420p':
+            self.skipTest('本机编码器没有生成全范围 H.264 样片')
+        with patch.dict(os.environ, {'CLI_TEST_MODE': 'full_range'}):
+            task = self.submit()
+        self.assertEqual(task['status'], 'completed', task.get('error'))
+        version = store.get('version', task['output']['version_id'])
+        self.assertFalse(any('已转换' in note for note in version['result']['notes']))
+        saved = store.project_file(self.project['id'], version['preview']['video'])
+        visual = next(s for s in media.probe(saved, event)['streams'] if s['codec_type'] == 'video')
+        self.assertEqual((visual['codec_name'], visual['pix_fmt']), ('h264', 'yuvj420p'))
 
     def test_sessions_from_the_old_working_folder_are_not_resumed(self):
         legacy = store.put('version', {'stage': 'edit', 'result': {}, 'cli_session_id': '6f0b2a5e-5c4f-4d6e-9b1a-2b3c4d5e6f70'},
